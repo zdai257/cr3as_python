@@ -80,7 +80,7 @@ pip show dobot_sdk
 
 | 配置项 | 说明 |
 |--------|------|
-| **机器人 IP** | 192.168.1.100（默认） |
+| **机器人 IP** | 192.168.5.1（见 config/robot.yaml） |
 | **Dashboard 端口** | 29999 |
 | **Feedback 端口** | 30004/30005/30006 |
 | **本机 IP** | 需设置为 192.168.X.X 网段 |
@@ -94,10 +94,8 @@ pip show dobot_sdk
 ```python
 from dobot_sdk import DobotRobot
 
-ROBOT_IP = "192.168.1.100"
-
-# 使用上下文管理器（推荐）
-with DobotRobot(ROBOT_IP) as robot:
+# IP 见 config/robot.yaml（默认 192.168.5.1）
+with DobotRobot.from_config() as robot:
     # 初始化
     robot.robot_control.RequestControl()
     robot.robot_control.ClearError()
@@ -116,7 +114,7 @@ with DobotRobot(ROBOT_IP) as robot:
 from dobot_sdk import DobotRobot
 from dobot_sdk import CoordinateType
 
-with DobotRobot("192.168.1.100") as robot:
+with DobotRobot.from_config() as robot:
     robot.robot_control.RequestControl()
     robot.robot_control.EnableRobot()
 
@@ -138,7 +136,7 @@ with DobotRobot("192.168.1.100") as robot:
 ```python
 from dobot_sdk import DobotRobot
 
-with DobotRobot("192.168.1.100") as robot:
+with DobotRobot.from_config() as robot:
     robot.robot_control.EnableRobot()
 
     # 数字输出（按手臂二开md文档：DO(index, status)）
@@ -242,8 +240,7 @@ log_dir = get_log_directory()  # 返回: dobot_sdk/logs/
 from dobot_sdk import DobotRobot
 
 # 创建机器人对象，设置自定义超时时间
-robot = DobotRobot(
-    "192.168.1.100",
+robot = DobotRobot.from_config(
     connect_timeout=10.0,   # 连接超时时间（秒）
     receive_timeout=15.0    # 接收超时时间（秒）
 )

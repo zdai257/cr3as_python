@@ -1,0 +1,32 @@
+2026-11-04 16:46:29,213 - INFO - robot.Connect:157 - 正在连接到机器人 192.168.1.100...
+2026-11-04 16:46:32,262 - ERROR - connection.connect:213 - TCP连接失败: 192.168.1.100:29999 - [Errno 113] No route to host
+2026-11-04 16:46:32,264 - INFO - robot.StopFeedbackMonitor:229 - 状态监控已停止
+2026-11-04 16:46:32,264 - INFO - robot.StopFeedbackMonitor:229 - 状态监控已停止
+2026-11-04 16:46:32,264 - INFO - connection._stop_reconnect_loop:113 - 自动重连已停止: 192.168.1.100:29999
+2026-11-04 16:46:32,264 - WARNING - connection.disconnect:241 - TCP断开连接时发生错误: [Errno 107] Transport endpoint is not connected
+2026-11-04 16:46:32,265 - INFO - connection._stop_reconnect_loop:113 - 自动重连已停止: 192.168.1.100:30004
+2026-11-04 16:46:32,265 - INFO - robot.Disconnect:194 - 机器人已断开连接: 192.168.1.100
+2026-11-04 16:46:32,265 - INFO - robot.StopFeedbackMonitor:229 - 状态监控已停止
+2026-11-04 16:46:32,265 - INFO - connection._stop_reconnect_loop:113 - 自动重连已停止: 192.168.1.100:29999
+2026-11-04 16:46:32,265 - INFO - connection._stop_reconnect_loop:113 - 自动重连已停止: 192.168.1.100:30004
+2026-11-04 16:46:32,265 - INFO - robot.Disconnect:194 - 机器人已断开连接: 192.168.1.100
+2026-11-04 16:46:32,265 - INFO - connection._stop_reconnect_loop:113 - 自动重连已停止: 192.168.1.100:30004
+2026-11-04 16:46:32,265 - INFO - connection._stop_reconnect_loop:113 - 自动重连已停止: 192.168.1.100:29999
+2026-11-04 16:46:57,923 - INFO - robot.Connect:157 - 正在连接到机器人 192.168.5.1...
+2026-11-04 16:46:57,925 - INFO - connection.connect:199 - TCP连接成功: 192.168.5.1:29999
+2026-11-04 16:46:57,927 - INFO - connection.connect:199 - TCP连接成功: 192.168.5.1:30004
+2026-11-04 16:46:57,927 - INFO - robot.Connect:167 - 机器人连接成功: 192.168.5.1
+2026-11-04 16:46:57,962 - INFO - robot.StartFeedbackMonitor:221 - 状态监控已启动
+2026-11-04 16:47:10,448 - INFO - robot.StopFeedbackMonitor:229 - 状态监控已停止
+2026-11-04 16:47:10,449 - INFO - robot.StopFeedbackMonitor:229 - 状态监控已停止
+2026-11-04 16:47:10,449 - INFO - connection._stop_reconnect_loop:113 - 自动重连已停止: 192.168.5.1:29999
+2026-11-04 16:47:10,451 - INFO - connection.disconnect:239 - TCP连接已断开: 192.168.5.1:29999
+2026-11-04 16:47:10,451 - INFO - connection._stop_reconnect_loop:113 - 自动重连已停止: 192.168.5.1:30004
+2026-11-04 16:47:10,452 - INFO - connection.disconnect:239 - TCP连接已断开: 192.168.5.1:30004
+2026-11-04 16:47:10,452 - INFO - robot.Disconnect:194 - 机器人已断开连接: 192.168.5.1
+2026-11-04 16:47:10,453 - INFO - robot.StopFeedbackMonitor:229 - 状态监控已停止
+2026-11-04 16:47:10,453 - INFO - connection._stop_reconnect_loop:113 - 自动重连已停止: 192.168.5.1:29999
+2026-11-04 16:47:10,454 - INFO - connection._stop_reconnect_loop:113 - 自动重连已停止: 192.168.5.1:30004
+2026-11-04 16:47:10,454 - INFO - robot.Disconnect:194 - 机器人已断开连接: 192.168.5.1
+2026-11-04 16:47:10,455 - INFO - connection._stop_reconnect_loop:113 - 自动重连已停止: 192.168.5.1:30004
+2026-11-04 16:47:10,455 - INFO - connection._stop_reconnect_loop:113 - 自动重连已停止: 192.168.5.1:29999

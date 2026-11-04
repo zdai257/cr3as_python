@@ -53,8 +53,10 @@ from dobot_sdk import DobotRobot
 **Directory Structure Requirement:**
 ```
 TCP-IP-Python-V4-main/
+├── config/robot.yaml           ← shared IP / payload / HRC waypoints
 ├── dobot_sdk/                  ← SDK core package
-├── examples/                   ← Examples directory (place your script here)
+├── hrc/                        ← CS3AS pick-and-place + planners
+├── examples/                   ← examples (place your script here)
 │   └── your_script.py
 └── README.md
 ```
@@ -80,7 +82,7 @@ pip show dobot_sdk
 
 | Config | Description |
 |--------|-------------|
-| **Robot IP** | 192.168.1.100 (default) |
+| **Robot IP** | 192.168.5.1 (see `config/robot.yaml`) |
 | **Dashboard Port** | 29999 |
 | **Feedback Port** | 30004/30005/30006 |
 | **PC IP** | Must be in 192.168.X.X subnet |
@@ -94,10 +96,8 @@ pip show dobot_sdk
 ```python
 from dobot_sdk import DobotRobot
 
-ROBOT_IP = "192.168.1.100"
-
-# Using context manager (Recommended)
-with DobotRobot(ROBOT_IP) as robot:
+# IP and ports come from config/robot.yaml (default 192.168.5.1)
+with DobotRobot.from_config() as robot:
     # Initialization
     robot.robot_control.RequestControl()
     robot.robot_control.ClearError()
@@ -116,7 +116,7 @@ with DobotRobot(ROBOT_IP) as robot:
 from dobot_sdk import DobotRobot
 from dobot_sdk import CoordinateType
 
-with DobotRobot("192.168.1.100") as robot:
+with DobotRobot.from_config() as robot:
     robot.robot_control.RequestControl()
     robot.robot_control.EnableRobot()
 
@@ -138,7 +138,7 @@ with DobotRobot("192.168.1.100") as robot:
 ```python
 from dobot_sdk import DobotRobot
 
-with DobotRobot("192.168.1.100") as robot:
+with DobotRobot.from_config() as robot:
     robot.robot_control.EnableRobot()
 
     # Digital output (per arm SDK docs: DO(index, status))
@@ -154,11 +154,14 @@ with DobotRobot("192.168.1.100") as robot:
 ## Running Examples
 
 ```bash
-# Run example code
+# Run example code (IP from config/robot.yaml, default 192.168.5.1)
 cd examples
 python 01_basic_connection.py
 python 02_motion_control.py
 python 03_error_monitor.py
+
+# CS3AS pick-and-place + obstacle-avoidance planners (dry-run)
+python hrc/examples/pick_and_place.py --compare
 
 # Run GUI
 cd demo
@@ -171,6 +174,8 @@ python main_UI.py
 
 ```
 TCP-IP-Python-V4-main/
+├── config/robot.yaml       # Shared robot / cell parameters
+├── hrc/                    # HRC research (CS3AS, gripper, planners)
 ├── dobot_sdk/              # SDK Core Package
 │   ├── api/                # API Interface Layer
 │   ├── core/               # Core Communication Layer
@@ -242,8 +247,7 @@ log_dir = get_log_directory()  # Returns: dobot_sdk/logs/
 from dobot_sdk import DobotRobot
 
 # Create robot with custom timeout settings
-robot = DobotRobot(
-    "192.168.1.100",
+robot = DobotRobot.from_config(
     connect_timeout=10.0,   # Connection timeout in seconds
     receive_timeout=15.0    # Receive timeout in seconds
 )

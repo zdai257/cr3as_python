@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Dobot
 # Licensed under the MIT License
 
-"""API接口模块"""
+"""API module"""
 
 from .robot import DobotRobot
 from .motion import CoordinateType, Motion
@@ -12,12 +12,12 @@ from .robot_control import RobotControl
 from .error_controller import ErrorController
 
 __all__ = [
-    "DobotRobot",
-    "CoordinateType",
-    "Motion",
-    "IO",
-    "Communication",
-    "Plugins",
-    "RobotControl",
-    "ErrorController",
+  "DobotRobot",
+  "CoordinateType",
+  "Motion",
+  "IO",
+  "Communication",
+  "Plugins",
+  "RobotControl",
+  "ErrorController",
 ]

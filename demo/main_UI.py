@@ -1,11 +1,12 @@
 """
-UI界面主入口
+UI entry
 """
 
+from dobot_sdk import load_robot_config
 from ui import RobotUI
 
-# 创建并运行机器人UI
+# Create and run the robot UI
 if __name__ == "__main__":
-    robot_ui = RobotUI(robot_ip="192.168.5.1")
-    robot_ui.pack()
-    robot_ui.mainloop()
+  robot_ui = RobotUI(robot_ip=load_robot_config().ip)
+  robot_ui.pack()
+  robot_ui.mainloop()

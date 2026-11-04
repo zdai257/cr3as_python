@@ -1,0 +1,123 @@
+# Central high-level configuration for every script in this repo.
+# Examples, demos, tests, and hrc/ all load this file via dobot_sdk.config.
+# Change values here instead of editing individual Python files.
+
+robot:
+  ip: "192.168.5.1"
+  dashboard_port: 29999
+  feedback_port: 30004
+  feedback_port_30005: null
+  feedback_port_30006: null
+  connect_timeout: 5.0
+  receive_timeout: 10.0
+  model: "CS3AS"
+  payload_kg: 1.0
+  speed_factor: 20          # percent, keep low for HRC bring-up
+  home_joints: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # deg
+
+gripper:
+  type: "DH_PGEA_50_26"
+  enabled: true
+  slave_id: 1
+  baud: 115200
+  parity: "N"               # some PGE firmware uses E
+  data_bits: 8
+  stop_bits: 1
+  stroke_mm: 26.0
+  force_percent: 50         # 20-100
+  speed_percent: 50         # 1-100
+  # Standard DH PGE / PGE-A holding registers
+  reg_init: 256             # 0x0100
+  reg_force: 257            # 0x0101
+  reg_position: 258         # 0x0102
+  reg_speed: 259            # 0x0103
+  reg_status: 512           # 0x0200
+  reg_feedback_pos: 513     # 0x0201
+  init_value: 1
+  open_position: 1000       # 0 = fully closed, 1000 = fully open
+  close_position: 0
+  settle_s: 0.8
+
+skins:
+  enabled: true
+  forearm_part: 3           # EnableSafeSkin / SetSafeSkin part ids
+  j4_part: 4
+  j5_part: 5
+  j6_part: 6
+  sensitivity: 2            # 0=off, 1=low, 2=mid, 3=high
+  channels: 8               # reserved for analog conductance DAQ
+  conductance_threshold: 0.0  # TBC once the DAQ is wired
+
+kinematics:
+  # Modified DH (Craig). Link lengths are TBC — replace from URDF or measurement.
+  # Controller InverseKin/PositiveKin remains the hardware source of truth.
+  convention: "modified_dh"
+  dh:
+    - {a_mm: 0.0,   alpha_deg: 0.0,   d_mm: 142.7, theta_offset_deg: 0.0}     # J1 TBC
+    - {a_mm: 0.0,   alpha_deg: -90.0, d_mm: 0.0,   theta_offset_deg: -90.0}   # J2 TBC
+    - {a_mm: 280.0, alpha_deg: 0.0,   d_mm: 0.0,   theta_offset_deg: 0.0}     # J3 TBC
+    - {a_mm: 0.0,   alpha_deg: -90.0, d_mm: 225.0, theta_offset_deg: 0.0}     # J4 TBC
+    - {a_mm: 0.0,   alpha_deg: 90.0,  d_mm: 0.0,   theta_offset_deg: 0.0}     # J5 TBC
+    - {a_mm: 0.0,   alpha_deg: -90.0, d_mm: 72.0,  theta_offset_deg: 0.0}     # J6 TBC
+  joint_limits_deg:
+    - [-180.0, 180.0]
+    - [-135.0, 135.0]
+    - [-150.0, 150.0]
+    - [-180.0, 180.0]
+    - [-180.0, 180.0]
+    - [-180.0, 180.0]
+  link_radii_mm: [60.0, 50.0, 45.0, 40.0, 35.0, 30.0]
+
+hrc:
+  planner: "rrt_star"       # cartesian_linear | joint_linear | rrt | rrt_star | apf | learning
+  execute: false            # false = plan-only dry-run until waypoints are taught
+  replan_hz: 10.0
+  tcp_speed_mms: 80.0
+  collision_margin_mm: 40.0
+  workspace_mm:
+    x: [150.0, 500.0]
+    y: [-300.0, 300.0]
+    z: [50.0, 450.0]
+  rrt:
+    max_iter: 1200
+    step_mm: 25.0
+    goal_bias: 0.12
+    goal_tolerance_mm: 20.0
+  apf:
+    attract_gain: 1.0
+    repulse_gain: 4000.0
+    influence_mm: 120.0
+    step_mm: 12.0
+    max_iter: 400
+  learning:
+    checkpoint: null        # path to a future policy / VLA checkpoint
+    device: "cpu"
+  # Cartesian mm,deg. null = not taught yet.
+  waypoints:
+    pre_pick:   [null, null, null, null, null, null]
+    pick:       [null, null, null, null, null, null]
+    post_pick:  [null, null, null, null, null, null]
+    pre_place:  [null, null, null, null, null, null]
+    place:      [null, null, null, null, null, null]
+    post_place: [null, null, null, null, null, null]
+  # Used when waypoints are still TBC so planners can be evaluated offline.
+  demo_start: [320.0, -180.0, 280.0, 180.0, 0.0, 180.0]
+  demo_goal:  [320.0,  180.0, 280.0, 180.0, 0.0, 180.0]
+  oracle_obstacles:
+    - name: "human_forearm"
+      type: "capsule"
+      p1: [300.0, -25.0, 240.0]
+      p2: [360.0, 35.0, 270.0]
+      radius_mm: 40.0
+      velocity_mms: [8.0, 4.0, 0.0]
+    - name: "torso_approx"
+      type: "sphere"
+      center: [140.0, 260.0, 160.0]
+      radius_mm: 70.0
+      velocity_mms: [0.0, 0.0, 0.0]
+
+perception:
+  rgbd_enabled: false
+  lidar_enabled: false
+  rgbd_topic: ""            # TBC: ROS / camera serial / OpenNI device
+  lidar_topic: ""
