@@ -1,0 +1,18 @@
+# DH Robotics PGEA-50-26 envelope used by hrc.models.PGEA5026Model.
+# Source: DH PGEA catalog V255 (118 x 55 x 29 mm, 26 mm stroke, 0.5 kg).
+# CS3AS tool frame: x=0, y=0, z=118 mm (flange -> TCP).
+
+name: "DH_PGEA_50_26"
+mass_kg: 0.5
+length_mm: 118.0
+width_mm: 55.0
+thickness_mm: 29.0
+stroke_mm: 26.0
+min_gap_mm: 1.2
+max_gap_mm: 27.2
+force_n: [15.0, 50.0]
+tcp_offset_mm: [0.0, 0.0, 118.0]
+tcp_rpy_deg: [0.0, 0.0, 0.0]
+body_radius_mm: 28.0
+finger_radius_mm: 8.0
+urdf: "models/pgea_50_26/urdf/pgea_50_26.urdf"

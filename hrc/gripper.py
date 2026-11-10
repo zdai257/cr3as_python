@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Optional
 
+from .models.pgea import PGEA5026Model
 from .utils.dashboard import parse_dashboard
 
 
@@ -14,6 +15,7 @@ class PGEAGripper:
   def __init__(self, robot, cfg):
     self.robot = robot
     self.cfg = cfg
+    self.model = PGEA5026Model(cfg)
     self.index: Optional[int] = None
     self.connected = False
 
@@ -67,6 +69,42 @@ class PGEAGripper:
     )
     _, values, _ = parse_dashboard(response)
     return int(values[0]) if values else None
+
+  def opening_mm(self) -> Optional[float]:
+    pos = self.position()
+    if pos is None:
+      return None
+    return self.model.opening_mm(pos)
+
+  def status_word(self) -> Optional[int]:
+    if self.index is None:
+      return None
+    response = self.robot.communication.GetHoldRegs(
+      self.index, int(self.cfg.reg_status), 1, "U16"
+    )
+    _, values, _ = parse_dashboard(response)
+    return int(values[0]) if values else None
+
+  def grip_state(self) -> Optional[int]:
+    """0 moving, 1 arrived, 2 object gripped, 3 object dropped (DH map)."""
+    if self.index is None:
+      return None
+    addr = self.cfg.get("reg_grip_state") if hasattr(self.cfg, "get") else None
+    if addr is None:
+      addr = getattr(self.cfg, "reg_grip_state", None)
+    if addr is None:
+      return self.status_word()
+    response = self.robot.communication.GetHoldRegs(self.index, int(addr), 1, "U16")
+    _, values, _ = parse_dashboard(response)
+    return int(values[0]) if values else None
+
+  def as_dict(self) -> dict:
+    return {
+      "connected": self.connected,
+      "position": self.position() if self.connected else None,
+      "opening_mm": self.opening_mm() if self.connected else None,
+      "model": self.model.as_dict(),
+    }
 
   def _write(self, addr: int, value: int) -> None:
     if self.index is None:

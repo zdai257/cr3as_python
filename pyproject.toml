@@ -37,6 +37,10 @@ dev = [
 gui = [
     "numpy>=1.19.0",
 ]
+research = [
+    "matplotlib>=3.4",
+    "pyarrow>=10.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/dobot-cn/TCP-IP-Python-V4-main/tree/feature/v4-optimization"
@@ -48,7 +52,7 @@ package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["dobot_sdk*"]
+include = ["dobot_sdk*", "hrc*"]
 exclude = ["tests*", "examples*", "demo*"]
 
 [tool.pytest.ini_options]

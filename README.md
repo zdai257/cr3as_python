@@ -163,6 +163,10 @@ python 03_error_monitor.py
 # CS3AS pick-and-place + obstacle-avoidance planners (dry-run)
 python hrc/examples/pick_and_place.py --compare
 
+# SafeSkin stream (port 30004) and policy-dataset tools
+python hrc/examples/stream_skins.py --seconds 10
+python hrc/examples/export_dataset.py --synthetic --lerobot data/lerobot/synth --ros2 data/ros2/synth
+
 # Run GUI
 cd demo
 python main_UI.py
@@ -175,7 +179,10 @@ python main_UI.py
 ```
 TCP-IP-Python-V4-main/
 ├── config/robot.yaml       # Shared robot / cell parameters
-├── hrc/                    # HRC research (CS3AS, gripper, planners)
+├── hrc/                    # HRC research (CS3AS, gripper, skins, datasets)
+├── models/pgea_50_26/      # DH PGEA-50-26 URDF + meshes (TCP z=118 mm)
+├── third_party/dh_gripper_ros/  # Vendored DH ROS driver / msgs
+├── data/episodes/          # Native recorded episodes (npz)
 ├── dobot_sdk/              # SDK Core Package
 │   ├── api/                # API Interface Layer
 │   ├── core/               # Core Communication Layer

@@ -30,11 +30,17 @@ class OraclePerception(PerceptionFrontend):
     extra = extra or {}
     conductance = extra.get("skin_conductance")
     approach = extra.get("skin_approach")
+    proximity = extra.get("skin_proximity")
+    reading = extra.get("skin_reading")
     if self.skins is not None:
-      if conductance is None:
-        conductance = self.skins.conductance()
-      if approach is None:
-        approach = self.skins.approach_flags()
+      reading = reading or self.skins.read()
+      if reading is not None:
+        if conductance is None:
+          conductance = reading.conductance
+        if approach is None:
+          approach = reading.approach
+        if proximity is None:
+          proximity = reading.proximity
     world = WorldState(list(self.obstacles), timestamp=timestamp, margin_mm=self.margin)
     return Observation(
       timestamp=timestamp,
@@ -46,4 +52,7 @@ class OraclePerception(PerceptionFrontend):
       pointcloud=extra.get("pointcloud"),
       skin_conductance=conductance,
       skin_approach=approach,
+      skin_proximity=proximity,
+      skin_reading=reading,
+      gripper_position=extra.get("gripper_position"),
     )

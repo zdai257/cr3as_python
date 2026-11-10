@@ -169,10 +169,12 @@ class RobotStatus:
   
   # Safety status
   collision_state: int = 0 # Collision status
-  arm_approach_state: int = 0 # Forearm safe-skin approach pause
-  j4_approach_state: int = 0 # J4 safe-skin approach pause
-  j5_approach_state: int = 0 # J5 safe-skin approach pause
-  j6_approach_state: int = 0 # J6 safe-skin approach pause
+  arm_approach_state: int = 0 # Forearm safe-skin approach pause (I8 @ 1039)
+  j4_approach_state: int = 0 # J4 safe-skin approach pause (I8 @ 1040)
+  j5_approach_state: int = 0 # J5 safe-skin approach pause (I8 @ 1041)
+  j6_approach_state: int = 0 # J6 safe-skin approach pause (I8 @ 1042)
+  skin_analog_raw: List[int] = field(default_factory=lambda: [0] * 61) # reserved bytes after J6 (offset 1043)
+  skin_analog: List[float] = field(default_factory=lambda: [0.0] * 4) # decoded analog channels
   safety_state: int = 0 # Safety bitmask
   
   # Vibration

@@ -47,7 +47,8 @@ def main():
     'test_motion.py',
     'test_robot_control.py',
     'test_plugins.py',
-    'test_communication.py'
+    'test_communication.py',
+    'test_hrc_research.py',
   ]
   
   passed = 0

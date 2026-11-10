@@ -10,12 +10,14 @@ High-level numbers live in [`config/robot.yaml`](../config/robot.yaml) (IP `192.
 hrc/
   robot.py              CS3ASRobot(DobotRobot) — arm + gripper + skins + IK
   gripper.py            PGEA-50-26 via tool RS485 Modbus RTU
+  models/               PGEA-50-26 URDF / TCP / collision capsules
   pipeline.py           pick-and-place stages, planner-agnostic
   world.py              Observation / WorldState
   planning/             cartesian_linear, joint_linear, rrt, rrt_star, apf, learning
-  perception/           oracle (now), rgbd / lidar / skins (hooks)
+  perception/           oracle, skins (30004), rgbd / lidar hooks
+  data/                 episode recorder, LeRobot export, rosbag2, plots
   utils/                dashboard parse, FK/IK, rotations, capsules
-  examples/pick_and_place.py
+  examples/
 ```
 
 ## Pick-and-place
@@ -40,15 +42,36 @@ Until those Cartesian poses are taught (`null` in the YAML), the script plans `d
 3. Implement `plan(start, goal, world, ...) -> Trajectory`.
 4. Select it with `--planner my_name` or `hrc.planner` in YAML.
 
-`learning` is a stub: subclass `LearningPlanner` and implement `load()` / `infer(Observation)`. `Observation.as_policy_obs()` is the intended VLA / policy input (joints, pose, obstacles, rgb, depth, pointcloud, skins).
+`learning` is a stub: subclass `LearningPlanner` and implement `load()` / `infer(Observation)`. `Observation.as_policy_obs()` is the intended VLA / policy input (joints, pose, gripper, obstacles, rgb, depth, pointcloud, skin approach / proximity / conductance).
+
+## Gripper model
+
+URDF + meshes: `models/pgea_50_26/` (118 x 55 x 29 mm, TCP z = 118 mm). Driver reference: `third_party/dh_gripper_ros`. `CS3ASRobot.prepare()` calls `SetTool` / `Tool` with that offset.
+
+## SafeSkin (port 30004)
+
+`SafeSkinFrontend.read()` returns a `SkinReading` parsed from the 8 ms Feedback packet: I8 approach flags on forearm / J4 / J5 / J6 plus analog channels decoded from the reserved bytes after offset 1042.
+
+```bash
+python hrc/examples/stream_skins.py --seconds 20
+```
+
+## Datasets for learned policies
+
+```bash
+python hrc/examples/collect_episode.py --seconds 8 --lerobot data/lerobot/demo --ros2 data/ros2/demo
+python hrc/examples/export_dataset.py --synthetic --lerobot data/lerobot/synth
+python hrc/examples/visualize_episode.py data/episodes/episode_0000.npz --png /tmp/ep.png
+```
+
+Native store is `data/episodes/*.npz`. LeRobot v2.1 layout is `meta/info.json` + parquet (JSONL if pyarrow is missing). rosbag2 sqlite3 uses CDR `Float64MultiArray` on `/cs3as/*`.
 
 ## Perception hooks
 
 | Source | Status |
 |--------|--------|
 | Oracle obstacles + constant velocity | used now |
-| Safe-skin approach bits from Feedback | wrapped in `SafeSkinFrontend` |
-| Analog skin conductance | `set_conductance()` stub |
+| SafeSkin approach + analog from Feedback 30004 | `SkinReading` |
 | RGB-D / LiDAR | disabled stubs; set `perception.rgbd_enabled` when wired |
 
 ## Kinematics

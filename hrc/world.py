@@ -24,12 +24,16 @@ class Observation:
   pointcloud: Optional[np.ndarray] = None
   skin_conductance: Optional[np.ndarray] = None
   skin_approach: Optional[np.ndarray] = None
+  skin_proximity: Optional[np.ndarray] = None
+  skin_reading: Optional[object] = None
+  gripper_position: Optional[float] = None
 
   def as_policy_obs(self) -> dict:
     return {
       "timestamp": self.timestamp,
       "joints": self.joints,
       "pose": self.pose,
+      "gripper_position": self.gripper_position,
       "obstacles": [
         {
           "name": o.name,
@@ -47,6 +51,7 @@ class Observation:
       "pointcloud": self.pointcloud,
       "skin_conductance": self.skin_conductance,
       "skin_approach": self.skin_approach,
+      "skin_proximity": self.skin_proximity,
     }
 
 

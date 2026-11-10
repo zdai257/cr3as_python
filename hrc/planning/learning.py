@@ -7,7 +7,10 @@ Wire a checkpoint later:
     def infer(self, observation) -> Trajectory: ...
 
 The Observation.as_policy_obs() dict is the stable input contract
-(joints, pose, obstacles, rgb, depth, pointcloud, skins).
+(joints, pose, gripper_position, obstacles, rgb, depth, pointcloud,
+skin_approach, skin_proximity, skin_conductance). Record with
+hrc.data.EpisodeRecorder and export via write_lerobot_dataset /
+write_ros2_bag.
 """
 
 from __future__ import annotations

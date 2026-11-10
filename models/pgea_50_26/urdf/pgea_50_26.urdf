@@ -1,0 +1,102 @@
+<?xml version="1.0"?>
+<!-- DH Robotics PGEA-50-26. Units: metres / radians.
+     Mount frame `pgea_base_link` coincides with the CS3AS flange.
+     TCP is 118 mm along +Z (tool offset x=0, y=0, z=118 mm).
+     Finger joints are prismatic; mimic closes both jaws.
+     Opening 0.0 m = fully closed (1.2 mm gap), 0.013 m per jaw = fully open. -->
+<robot name="pgea_50_26">
+  <link name="pgea_base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="../meshes/body.stl" scale="1 1 1"/>
+      </geometry>
+      <material name="dh_black">
+        <color rgba="0.18 0.18 0.20 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.050" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.055 0.029 0.100"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.050" rpy="0 0 0"/>
+      <mass value="0.40"/>
+      <inertia ixx="0.000492" ixy="0" ixz="0" iyy="0.000565" iyz="0" izz="0.000129"/>
+    </inertial>
+  </link>
+
+  <link name="pgea_finger_left">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="../meshes/finger.stl" scale="1 1 1"/>
+      </geometry>
+      <material name="dh_silver">
+        <color rgba="0.75 0.75 0.78 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.009" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.012 0.010 0.018"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.009" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="1.6e-6" ixy="0" ixz="0" iyy="2.0e-6" iyz="0" izz="8.7e-7"/>
+    </inertial>
+  </link>
+
+  <link name="pgea_finger_right">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="../meshes/finger.stl" scale="1 1 1"/>
+      </geometry>
+      <material name="dh_silver">
+        <color rgba="0.75 0.75 0.78 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.009" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.012 0.010 0.018"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.009" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="1.6e-6" ixy="0" ixz="0" iyy="2.0e-6" iyz="0" izz="8.7e-7"/>
+    </inertial>
+  </link>
+
+  <link name="pgea_tcp"/>
+
+  <!-- Closed: each jaw at y = ±0.0006 m (1.2 mm gap). Open: ±0.0136 m. -->
+  <joint name="pgea_finger_left_joint" type="prismatic">
+    <parent link="pgea_base_link"/>
+    <child link="pgea_finger_left"/>
+    <origin xyz="0 0.0006 0.100" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0.0" upper="0.013" effort="50" velocity="0.05"/>
+  </joint>
+
+  <joint name="pgea_finger_right_joint" type="prismatic">
+    <parent link="pgea_base_link"/>
+    <child link="pgea_finger_right"/>
+    <origin xyz="0 -0.0006 0.100" rpy="0 0 3.141592653589793"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0.0" upper="0.013" effort="50" velocity="0.05"/>
+    <mimic joint="pgea_finger_left_joint" multiplier="1" offset="0"/>
+  </joint>
+
+  <joint name="pgea_tcp_joint" type="fixed">
+    <parent link="pgea_base_link"/>
+    <child link="pgea_tcp"/>
+    <origin xyz="0 0 0.118" rpy="0 0 0"/>
+  </joint>
+</robot>

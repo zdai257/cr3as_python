@@ -36,7 +36,9 @@ class CS3ASRobot(DobotRobot):
     )
     self.gripper = PGEAGripper(self, self.cfg.gripper)
     self.skins = SafeSkinFrontend(self, self.cfg.skins)
-    self.kin = Kinematics(self.cfg.kinematics, robot=self)
+    self.kin = Kinematics(
+      self.cfg.kinematics, robot=self, gripper_model=self.gripper.model
+    )
 
   def prepare(self, enable: bool = True, connect_gripper: bool = True) -> None:
     self.robot_control.RequestControl()
@@ -48,6 +50,7 @@ class CS3ASRobot(DobotRobot):
       self.robot_control.EnableRobot(load=float(self.cfg.robot.payload_kg))
       self.robot_control.SpeedFactor(int(self.cfg.robot.speed_factor))
       self.wait_idle()
+    self.apply_tool_frame()
     if connect_gripper and self.cfg.gripper.enabled:
       self.gripper.connect()
 
@@ -66,6 +69,53 @@ class CS3ASRobot(DobotRobot):
       self.StopFeedbackMonitor()
     except Exception:
       pass
+
+  def apply_tool_frame(self) -> None:
+    """Load the PGEA-50-26 TCP (x=0, y=0, z=118 mm) onto the controller."""
+    gripper_cfg = self.cfg.gripper
+    apply = True
+    if hasattr(gripper_cfg, "get"):
+      apply = bool(gripper_cfg.get("apply_tool", True))
+    if not apply:
+      return
+    index = int(gripper_cfg.get("tool_index", 1)) if hasattr(gripper_cfg, "get") else 1
+    pose = [float(v) for v in self.gripper.model.tool_pose()]
+    persist = gripper_cfg.get("tool_persist", 0) if hasattr(gripper_cfg, "get") else 0
+    self.robot_control.SetTool(index, pose, type=int(persist) if persist is not None else 0)
+    self.robot_control.Tool(index)
+
+  def observation(self, extra: Optional[dict] = None):
+    from .world import Observation, WorldState
+
+    extra = extra or {}
+    joints = extra.get("joints")
+    pose = extra.get("pose")
+    try:
+      if joints is None:
+        joints = self.current_joints()
+      if pose is None:
+        pose = self.current_pose()
+    except Exception:
+      joints = np.zeros(6) if joints is None else joints
+      pose = np.zeros(6) if pose is None else pose
+    reading = self.skins.read()
+    grip = extra.get("gripper_position")
+    if grip is None and self.gripper.connected:
+      try:
+        grip = self.gripper.position()
+      except Exception:
+        grip = None
+    return Observation(
+      timestamp=time.time(),
+      joints=np.asarray(joints, dtype=float),
+      pose=np.asarray(pose, dtype=float),
+      world=WorldState(margin_mm=float(self.cfg.hrc.collision_margin_mm)),
+      skin_conductance=None if reading is None else reading.conductance,
+      skin_approach=None if reading is None else reading.approach,
+      skin_proximity=None if reading is None else reading.proximity,
+      skin_reading=reading,
+      gripper_position=grip,
+    )
 
   def go_home(self) -> str:
     joints = [float(v) for v in self.cfg.robot.home_joints]

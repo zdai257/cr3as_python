@@ -1,0 +1,3 @@
+Imported 2026-11-10 from https://github.com/DH-Robotics/dh_gripper_ros (master).
+PDFs were skipped during unzip (encoding). Driver, msgs, and other-gripper URDFs are intact.
+PGEA-50-26 URDF is not in this repo; see ../../models/pgea_50_26/.

@@ -239,10 +239,11 @@ class DobotRobot:
     Args:
       callback: Optional callback receiving RobotStatus
     """
+    if callback is not None:
+      self._callback = callback
     if self._feedback_running:
       return
 
-    self._callback = callback
     self._feedback_running = True
 
     self._feedback_thread = threading.Thread(

@@ -181,12 +181,23 @@ class FeedbackParser:
     status.six_force_online = int(parsed['SixForceOnline'][0])
     status.six_force_value = parsed['SixForceValue'][0].tolist()
 
-    # Safety status
+    # Safety status (SafeSkin on 30004)
     status.collision_state = int(parsed['CollisionState'][0])
     status.arm_approach_state = int(parsed['ArmApproachState'][0])
     status.j4_approach_state = int(parsed['J4ApproachState'][0])
     status.j5_approach_state = int(parsed['J5ApproachState'][0])
     status.j6_approach_state = int(parsed['J6ApproachState'][0])
+    raw = np.asarray(parsed['reserve7'][0], dtype=np.uint8).tolist()
+    status.skin_analog_raw = [int(v) & 0xFF for v in raw]
+    analog_n = min(4, len(status.skin_analog_raw) // 2)
+    analog = []
+    for i in range(analog_n):
+      lo = status.skin_analog_raw[2 * i]
+      hi = status.skin_analog_raw[2 * i + 1]
+      analog.append(float(lo | (hi << 8)))
+    while len(analog) < 4:
+      analog.append(0.0)
+    status.skin_analog = analog
     status.safety_state = int(parsed['SafetyState'][0])
     status.safe_state = int(parsed['SafeState'][0])
 

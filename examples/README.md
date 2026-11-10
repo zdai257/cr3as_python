@@ -19,7 +19,7 @@ Function-grouped Dobot SDK samples. Robot IP, ports, and payload come from `conf
 python examples/01_basic_connection.py
 ```
 
-HRC pick-and-place lives in `hrc/examples/pick_and_place.py`.
+HRC pick-and-place lives in `hrc/examples/pick_and_place.py`. Dataset / SafeSkin tools: `hrc/examples/collect_episode.py`, `stream_skins.py`, `visualize_episode.py`, `export_dataset.py`.
 
 ## Notes
 

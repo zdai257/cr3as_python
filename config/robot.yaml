@@ -24,15 +24,26 @@ gripper:
   data_bits: 8
   stop_bits: 1
   stroke_mm: 26.0
+  mass_kg: 0.5
   force_percent: 50         # 20-100
   speed_percent: 50         # 1-100
-  # Standard DH PGE / PGE-A holding registers
+  # CS3AS tool frame: flange -> TCP. Matches PGEA-50-26 length 118 mm.
+  tool_offset_mm: [0.0, 0.0, 118.0]
+  tcp_rpy_deg: [0.0, 0.0, 0.0]
+  tool_index: 1
+  apply_tool: true
+  tool_persist: 0           # 0 = this session, 1 = store on controller
+  urdf: "models/pgea_50_26/urdf/pgea_50_26.urdf"
+  # Holding registers. Default = PGE / PGE-A map that already talks to this cell.
+  # dh_gripper_ros uses 0x0103 pos / 0x0104 speed / 0xA5 init / 0x0202 pos fb.
+  register_map: "pge"
   reg_init: 256             # 0x0100
   reg_force: 257            # 0x0101
   reg_position: 258         # 0x0102
   reg_speed: 259            # 0x0103
   reg_status: 512           # 0x0200
   reg_feedback_pos: 513     # 0x0201
+  reg_grip_state: 513       # 0x0201 on pge map; 0x0201 grip-state on dh_ros map
   init_value: 1
   open_position: 1000       # 0 = fully closed, 1000 = fully open
   close_position: 0
@@ -45,8 +56,12 @@ skins:
   j5_part: 5
   j6_part: 6
   sensitivity: 2            # 0=off, 1=low, 2=mid, 3=high
-  channels: 8               # reserved for analog conductance DAQ
-  conductance_threshold: 0.0  # TBC once the DAQ is wired
+  channels: 4               # analog channels decoded from 30004 reserved bytes
+  analog_layout: "uint16_le"  # uint16_le | int16_le | uint8 | float32_le | float64_le
+  analog_scale: 1.0
+  analog_offset: 0.0
+  sense_range_mm: 150.0     # SafeSkin datasheet 5-15 cm
+  conductance_threshold: 0.0  # 0 = use binary approach flags only
 
 kinematics:
   # Modified DH (Craig). Link lengths are TBC — replace from URDF or measurement.
@@ -92,6 +107,9 @@ hrc:
   learning:
     checkpoint: null        # path to a future policy / VLA checkpoint
     device: "cpu"
+    dataset_dir: "data/episodes"
+    fps: 125                # port 30004 is 8 ms
+    task: "cs3as_hrc"
   # Cartesian mm,deg. null = not taught yet.
   waypoints:
     pre_pick:   [null, null, null, null, null, null]

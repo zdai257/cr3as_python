@@ -78,11 +78,11 @@ MyType = np.dtype([
   ('JawButtonSignal', np.byte),
   ('SixForceOnline', np.byte),
   ('CollisionState', np.byte),
-  ('ArmApproachState', np.byte),
+  ('ArmApproachState', np.byte),  # SafeSkin forearm, offset 1039
   ('J4ApproachState', np.byte),
   ('J5ApproachState', np.byte),
   ('J6ApproachState', np.byte),
-  ('reserve7', np.byte, (61,)),
+  ('reserve7', np.byte, (61,)),  # undocumented analog skin bytes after J6 flag
   ('VibrationDisZ', np.float64),
   ('CurrentCommandId', np.uint64),
   ('MActual', np.float64, (6,)),
