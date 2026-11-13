@@ -154,23 +154,36 @@ with DobotRobot.from_config() as robot:
 ## Running Examples
 
 ```bash
-# Run example code (IP from config/robot.yaml, default 192.168.5.1)
-cd examples
-python 01_basic_connection.py
-python 02_motion_control.py
-python 03_error_monitor.py
+# SDK samples (IP from config/robot.yaml, default 192.168.5.1)
+python examples/01_basic_connection.py
+python examples/02_motion_control.py
 
-# CS3AS pick-and-place + obstacle-avoidance planners (dry-run)
+# CS3AS HRC cell (SafeSkin, camera, datasets)
+python hrc/examples/stream_skins.py --seconds 20
+python hrc/examples/view_episodes.py data/lerobot/skins --open
 python hrc/examples/pick_and_place.py --compare
 
-# SafeSkin stream (port 30004) and policy-dataset tools
-python hrc/examples/stream_skins.py --seconds 10
-python hrc/examples/export_dataset.py --synthetic --lerobot data/lerobot/synth --ros2 data/ros2/synth
-
-# Run GUI
-cd demo
-python main_UI.py
+# GUI (Enable + SafeSkin; gripper after pendant DHGrip Init)
+python demo/main_UI.py
 ```
+
+---
+
+## CS3AS HRC modules
+
+This tree adds a research cell on top of `dobot_sdk`. Details: [`hrc/README.md`](hrc/README.md), [`demo/README.md`](demo/README.md), [`data/README.md`](data/README.md).
+
+| Path | Use |
+|------|-----|
+| `config/robot.yaml` | IP, payload, SafeSkin, gripper, camera, waypoints |
+| `hrc/robot.py` | `CS3ASRobot` — TCP, skins, gripper attach, hand-eye `query()` |
+| `hrc/perception/` | SafeSkin 125 Hz, ELP `/dev/video0`, oracle obstacles |
+| `hrc/data/` | Record npz / LeRobot parquet, HTML replay, HF dataset card |
+| `hrc/planning/` | Linear, RRT*, APF, learning stub |
+| `demo/main_UI.py` | Tk panel for arm + skins (+ gripper after plugin Init) |
+| `models/pgea_50_26/` | Gripper URDF / TCP z=118 mm |
+
+Pendant: TCP control source. **DHGrip_v2 Init** once before Python Open/Close. SafeSkin stream: `robot.stream_skins()`. Replay: `python hrc/examples/view_episodes.py`. Hugging Face: push `data/lerobot/<name>/` and open [lerobot/visualize_dataset](https://huggingface.co/spaces/lerobot/visualize_dataset).
 
 ---
 
@@ -179,10 +192,10 @@ python main_UI.py
 ```
 TCP-IP-Python-V4-main/
 ├── config/robot.yaml       # Shared robot / cell parameters
-├── hrc/                    # HRC research (CS3AS, gripper, skins, datasets)
+├── hrc/                    # CS3AS HRC: skins, camera, datasets, planners
 ├── models/pgea_50_26/      # DH PGEA-50-26 URDF + meshes (TCP z=118 mm)
-├── third_party/dh_gripper_ros/  # Vendored DH ROS driver / msgs
-├── data/episodes/          # Native recorded episodes (npz)
+├── third_party/dh_gripper_ros/  # DHGrip register-map reference
+├── data/                   # episodes (npz) + lerobot/ (parquet, replay.html)
 ├── dobot_sdk/              # SDK Core Package
 │   ├── api/                # API Interface Layer
 │   ├── core/               # Core Communication Layer

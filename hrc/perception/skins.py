@@ -18,9 +18,10 @@ because Dobot does not document analog skin ADC in the public packet map.
 
 from __future__ import annotations
 
+import queue
 import time
 from dataclasses import dataclass, field
-from typing import Optional, Sequence, Tuple
+from typing import Iterator, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -71,6 +72,32 @@ def decode_analog_raw(raw: Sequence[int], layout: str, channels: int) -> np.ndar
   return values[:n]
 
 
+def analog_scale_max(values: np.ndarray, analog_max: float = 0.0) -> float:
+  """Pick a stable denominator so proximity is not renormalized per frame."""
+  peak = float(np.max(np.abs(values))) if values.size else 0.0
+  configured = float(analog_max or 0.0)
+  if configured > 0:
+    return max(configured, peak) if peak > configured else configured
+  if peak <= 1.0:
+    return 1.0
+  if peak <= 255.0:
+    return 255.0
+  if peak <= 1023.0:
+    return 1023.0
+  return 65535.0
+
+
+def analog_to_proximity(analog: np.ndarray, analog_max: float = 0.0) -> np.ndarray:
+  a = np.asarray(analog, dtype=float).reshape(-1)
+  scale = analog_scale_max(a, analog_max)
+  if scale <= 0:
+    return np.zeros(len(SKIN_PARTS), dtype=float)
+  prox = np.clip(np.abs(a[: len(SKIN_PARTS)]) / scale, 0.0, 1.0)
+  if prox.size < len(SKIN_PARTS):
+    prox = np.pad(prox, (0, len(SKIN_PARTS) - prox.size))
+  return prox.astype(float)
+
+
 def approach_to_proximity(approach: np.ndarray) -> np.ndarray:
   """Map I8 approach flags / intensity to a 0-1 proximity signal."""
   a = np.asarray(approach, dtype=float).reshape(-1)
@@ -92,6 +119,7 @@ class SkinReading:
   analog_raw: np.ndarray = field(default_factory=lambda: np.zeros(61, dtype=np.uint8))
   proximity: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=float))
   conductance: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=float))
+  analog_max: float = 1023.0
   sense_range_mm: float = SENSE_RANGE_MM
 
   @classmethod
@@ -103,6 +131,7 @@ class SkinReading:
     analog_channels: int = 4,
     analog_scale: float = 1.0,
     analog_offset: float = 0.0,
+    analog_max: float = 1023.0,
     sense_range_mm: float = SENSE_RANGE_MM,
   ) -> Optional["SkinReading"]:
     if status is None:
@@ -119,20 +148,15 @@ class SkinReading:
     raw = np.asarray(getattr(status, "skin_analog_raw", np.zeros(61)), dtype=np.uint8)
     analog = decode_analog_raw(raw, analog_layout, analog_channels)
     analog = analog_offset + analog_scale * analog
-    analog_prox = np.zeros(len(SKIN_PARTS), dtype=float)
-    if analog.size:
-      peak = float(np.max(np.abs(analog)))
-      if peak > 0:
-        analog_prox = np.clip(np.abs(analog[: len(SKIN_PARTS)]) / peak, 0.0, 1.0)
-        if analog.size < len(SKIN_PARTS):
-          analog_prox = np.pad(analog_prox, (0, len(SKIN_PARTS) - analog.size))
+    analog_prox = analog_to_proximity(analog, analog_max)
     approach_prox = approach_to_proximity(approach)
+    # Prefer analog ADC when the reserved 30004 bytes are live; otherwise I8.
     proximity = analog_prox if float(np.max(analog_prox)) > 0 else approach_prox
     conductance = analog[: len(SKIN_PARTS)].copy()
     if conductance.size < len(SKIN_PARTS):
       conductance = np.pad(conductance, (0, len(SKIN_PARTS) - conductance.size))
     if float(np.max(np.abs(conductance))) == 0.0:
-      conductance = proximity.copy()
+      conductance = approach.copy()
     return cls(
       timestamp_ms=int(getattr(status, "timestamp", 0) or 0),
       approach=approach,
@@ -140,6 +164,7 @@ class SkinReading:
       analog_raw=raw.copy(),
       proximity=proximity.astype(float),
       conductance=conductance.astype(float),
+      analog_max=float(analog_scale_max(analog, analog_max)),
       sense_range_mm=float(sense_range_mm),
     )
 
@@ -163,6 +188,8 @@ class SkinReading:
       "proximity": self.proximity.tolist(),
       "conductance": self.conductance.tolist(),
       "distance_mm": self.distance_mm().tolist(),
+      "analog_max": self.analog_max,
+      "hit": bool(self.triggered()),
     }
 
   def policy_vector(self) -> np.ndarray:
@@ -183,6 +210,7 @@ class SafeSkinFrontend:
     self.analog_channels = int(_cfg_get(cfg, "channels", 4))
     self.analog_scale = float(_cfg_get(cfg, "analog_scale", 1.0))
     self.analog_offset = float(_cfg_get(cfg, "analog_offset", 0.0))
+    self.analog_max = float(_cfg_get(cfg, "analog_max", 1023.0) or 0.0)
     self.sense_range_mm = float(_cfg_get(cfg, "sense_range_mm", SENSE_RANGE_MM))
     self.threshold = float(_cfg_get(cfg, "conductance_threshold", 0.0))
     # firmware_safety=False: keep analog streaming but do not latch
@@ -300,6 +328,7 @@ class SafeSkinFrontend:
       analog_channels=self.analog_channels,
       analog_scale=self.analog_scale,
       analog_offset=self.analog_offset,
+      analog_max=self.analog_max,
       sense_range_mm=self.sense_range_mm,
     )
     if reading is not None:
@@ -342,6 +371,60 @@ class SafeSkinFrontend:
       return reading.triggered(self.threshold)
     return bool(self.threshold > 0 and np.any(self._conductance >= self.threshold))
 
+  def distance_mm(self) -> Optional[np.ndarray]:
+    reading = self.read()
+    return None if reading is None else reading.distance_mm()
+
+  def iter_live(
+    self,
+    seconds: Optional[float] = None,
+    *,
+    recover: bool = True,
+    timeout: float = 0.05,
+  ) -> Iterator[SkinReading]:
+    """Yield every 30004 sample (~125 Hz). Does not downsample."""
+    q: "queue.Queue[Optional[SkinReading]]" = queue.Queue(maxsize=64)
+    robot = self.robot
+    previous = getattr(robot, "_callback", None)
+
+    def on_status(status):
+      if previous:
+        previous(status)
+      reading = self.read(status, clear=False)
+      if recover and hasattr(robot, "recover_if_protected"):
+        try:
+          robot.recover_if_protected(status)
+        except Exception:
+          pass
+      if reading is None:
+        return
+      try:
+        q.put_nowait(reading)
+      except queue.Full:
+        try:
+          q.get_nowait()
+        except queue.Empty:
+          pass
+        try:
+          q.put_nowait(reading)
+        except queue.Full:
+          pass
+
+    robot._callback = on_status
+    if hasattr(robot, "StartFeedbackMonitor"):
+      robot.StartFeedbackMonitor()
+    t0 = time.time()
+    try:
+      while seconds is None or (time.time() - t0) < float(seconds):
+        try:
+          reading = q.get(timeout=timeout)
+        except queue.Empty:
+          continue
+        if reading is not None:
+          yield reading
+    finally:
+      robot._callback = previous
+
   def as_dict(self, reading: Optional[SkinReading] = None) -> dict:
     reading = reading if reading is not None else self._latest
     status = self.robot.GetStatus() if hasattr(self.robot, "GetStatus") else None
@@ -357,6 +440,8 @@ class SafeSkinFrontend:
       "proximity": None,
       "conductance": None,
       "triggered": False,
+      "analog_max": self.analog_max,
+      "sense_range_mm": self.sense_range_mm,
     }
     if reading is not None:
       payload["approach"] = reading.approach.tolist()
@@ -364,4 +449,6 @@ class SafeSkinFrontend:
       payload["conductance"] = reading.conductance.tolist()
       payload["triggered"] = bool(reading.triggered(self.threshold))
       payload["timestamp_ms"] = reading.timestamp_ms
+      payload["distance_mm"] = reading.distance_mm().tolist()
+      payload["analog"] = reading.analog.tolist()
     return payload

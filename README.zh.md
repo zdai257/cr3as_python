@@ -152,16 +152,13 @@ with DobotRobot.from_config() as robot:
 ## 运行示例
 
 ```bash
-# 运行示例代码
-cd examples
-python 01_basic_connection.py
-python 02_motion_control.py
-python 03_error_monitor.py
-
-# 运行图形化界面
-cd demo
-python main_UI.py
+python examples/01_basic_connection.py
+python hrc/examples/stream_skins.py --seconds 20
+python hrc/examples/view_episodes.py data/lerobot/skins --open
+python demo/main_UI.py
 ```
+
+协作单元说明见 [`hrc/README.md`](hrc/README.md)。
 
 ---
 

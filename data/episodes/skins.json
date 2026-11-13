@@ -1,0 +1,36 @@
+{
+  "task": "safeskin",
+  "robot_type": "dobot_cs3as_pgea",
+  "fps": 125.0,
+  "episode_index": 0,
+  "n_frames": 1408,
+  "state_names": [
+    "j1",
+    "j2",
+    "j3",
+    "j4",
+    "j5",
+    "j6",
+    "x",
+    "y",
+    "z",
+    "rx",
+    "ry",
+    "rz",
+    "gripper",
+    "skin_forearm",
+    "skin_j4",
+    "skin_j5",
+    "skin_j6"
+  ],
+  "action_names": [
+    "j1",
+    "j2",
+    "j3",
+    "j4",
+    "j5",
+    "j6",
+    "gripper"
+  ],
+  "extras": {}
+}

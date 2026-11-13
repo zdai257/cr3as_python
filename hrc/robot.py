@@ -10,7 +10,12 @@ import numpy as np
 from dobot_sdk import CoordinateType, DobotRobot, load_robot_config
 from dobot_sdk.api.tcp_control import mode_name
 
+from .data.lerobot_io import write_lerobot_dataset
+from .data.recorder import EpisodeRecorder
 from .gripper import PGEAGripper
+from .perception.camera import HandEyeCamera
+from .perception.oracle import OraclePerception
+from .perception.camera import HandEyePerception
 from .perception.skins import SKIN_PARTS, SafeSkinFrontend
 from .planning.base import Trajectory
 from .utils.dashboard import as_vector, parse_dashboard
@@ -37,12 +42,24 @@ class CS3ASRobot(DobotRobot):
     )
     self.gripper = PGEAGripper(self, self.cfg.gripper)
     self.skins = SafeSkinFrontend(self, self.cfg.skins)
+    self.camera = HandEyeCamera(self.cfg)
+    oracle = OraclePerception(self.cfg, skins=self.skins)
+    self.perception = HandEyePerception(
+      self.cfg, camera=self.camera, skins=self.skins, fallback=oracle
+    )
     self.kin = Kinematics(
       self.cfg.kinematics, robot=self, gripper_model=self.gripper.model
     )
     self._session_enabled = False
+    self._last_recover_s = 0.0
 
-  def prepare(self, enable: bool = True, connect_gripper: bool = True) -> None:
+  def prepare(
+    self,
+    enable: bool = True,
+    connect_gripper: bool = True,
+    connect_camera: bool = False,
+    enable_skins: bool = True,
+  ) -> None:
     """Take exclusive TCP control, clear latched safety, then arm the cell.
 
     SafeSkin Set*/Enable* commands are queued and only flush while the arm
@@ -58,10 +75,52 @@ class CS3ASRobot(DobotRobot):
       self.robot_control.SpeedFactor(int(self.cfg.robot.speed_factor))
       self.wait_idle()
     self.apply_tool_frame()
-    if self.cfg.skins.enabled:
+    if enable_skins and self.cfg.skins.enabled:
       self.skins.enable()
     if connect_gripper and self.cfg.gripper.enabled:
       self.gripper.connect()
+    if connect_camera:
+      try:
+        self.camera.open()
+        self.camera.start()
+      except Exception as exc:
+        self.camera.last_error = str(exc)
+        raise
+
+  def take_cell_control(
+    self,
+    *,
+    enable: bool = True,
+    skins: bool = True,
+    gripper: bool = True,
+    camera: bool = False,
+  ) -> list:
+    """TCP takeover + Enable + SafeSkin + DHGrip, matching Dobot+ plugins."""
+    errors = []
+    self.prepare(
+      enable=enable,
+      connect_gripper=False,
+      connect_camera=False,
+      enable_skins=False,
+    )
+    if skins and self.cfg.skins.enabled:
+      try:
+        self.skins.enable()
+      except Exception as exc:
+        errors.append(f"skins: {exc}")
+    if gripper and self.cfg.gripper.enabled:
+      try:
+        self.gripper.connect()
+      except Exception as exc:
+        errors.append(f"gripper: {exc}")
+    if camera:
+      try:
+        self.camera.open()
+        self.camera.start()
+      except Exception as exc:
+        self.camera.last_error = str(exc)
+        errors.append(f"camera: {exc}")
+    return errors
 
   def shutdown(self, disable: bool = False, skins_off: bool = True) -> None:
     """Drop the TCP sockets. Default: do not DisableRobot.
@@ -100,13 +159,18 @@ class CS3ASRobot(DobotRobot):
       except Exception:
         pass
     try:
+      self.camera.close()
+    except Exception:
+      pass
+    try:
       self.StopFeedbackMonitor()
     except Exception:
       pass
 
-  def recover_if_protected(self) -> int:
+  def recover_if_protected(self, status=None) -> int:
     """If a SafeSkin HIT latched pause/error/disable, stay in TCP and re-enable."""
-    status = self.GetStatus()
+    if status is None:
+      status = self.GetStatus()
     if status is not None:
       mode = int(status.robot_mode)
       collision = int(getattr(status, "collision_state", 0) or 0)
@@ -122,6 +186,10 @@ class CS3ASRobot(DobotRobot):
     latched = collision or mode in (9, 10) or (mode == 4 and hit)
     if not latched:
       return mode
+    now = time.time()
+    if now - self._last_recover_s < 0.35:
+      return mode
+    self._last_recover_s = now
     mode = self.reset_safety()
     if self.skins.firmware_safety:
       return mode
@@ -150,8 +218,45 @@ class CS3ASRobot(DobotRobot):
       "safety": status.get_safety_state_desc() if status else "unknown",
       "skins": self.skins.as_dict(reading),
       "gripper": gripper,
+      "camera": self.camera.as_dict(),
       "skin_parts": list(SKIN_PARTS),
     }
+
+  def query(self, extra: Optional[dict] = None):
+    """One perception snapshot: joints, pose, SafeSkin, gripper, hand-eye RGB."""
+    extra = dict(extra or {})
+    if self.gripper.connected and extra.get("gripper_position") is None:
+      try:
+        extra["gripper_position"] = self.gripper.position()
+      except Exception:
+        pass
+    return self.observation(extra)
+
+  def stream_skins(self, seconds: Optional[float] = None, recover: bool = True):
+    """Yield SafeSkin readings at the 30004 rate (~125 Hz / 8 ms)."""
+    return self.skins.iter_live(seconds=seconds, recover=recover)
+
+  def record_skins(
+    self,
+    seconds: float,
+    *,
+    task: Optional[str] = None,
+    lerobot=None,
+    recover: bool = True,
+  ):
+    """Record 8 ms SafeSkin + arm state; optionally export LeRobot parquet."""
+    rec = EpisodeRecorder(self, cfg=self.cfg, fps=125.0, task=task)
+    rec.start(task)
+    t0 = time.time()
+    while time.time() - t0 < float(seconds):
+      if recover:
+        self.recover_if_protected()
+      time.sleep(0.02)
+    path, ep = rec.save()
+    dest = None
+    if lerobot:
+      dest = write_lerobot_dataset([ep], lerobot, fps=ep.fps)
+    return path, ep, dest
 
   def apply_tool_frame(self) -> None:
     """Load the PGEA-50-26 TCP (x=0, y=0, z=118 mm) onto the controller."""
@@ -168,9 +273,7 @@ class CS3ASRobot(DobotRobot):
     self.robot_control.Tool(index)
 
   def observation(self, extra: Optional[dict] = None):
-    from .world import Observation, WorldState
-
-    extra = extra or {}
+    extra = dict(extra or {})
     joints = extra.get("joints")
     pose = extra.get("pose")
     try:
@@ -181,24 +284,15 @@ class CS3ASRobot(DobotRobot):
     except Exception:
       joints = np.zeros(6) if joints is None else joints
       pose = np.zeros(6) if pose is None else pose
-    reading = self.skins.read()
+    extra.setdefault("skin_reading", self.skins.read())
     grip = extra.get("gripper_position")
     if grip is None and self.gripper.connected:
       try:
         grip = self.gripper.position()
       except Exception:
         grip = None
-    return Observation(
-      timestamp=time.time(),
-      joints=np.asarray(joints, dtype=float),
-      pose=np.asarray(pose, dtype=float),
-      world=WorldState(margin_mm=float(self.cfg.hrc.collision_margin_mm)),
-      skin_conductance=None if reading is None else reading.conductance,
-      skin_approach=None if reading is None else reading.approach,
-      skin_proximity=None if reading is None else reading.proximity,
-      skin_reading=reading,
-      gripper_position=grip,
-    )
+      extra["gripper_position"] = grip
+    return self.perception.observe(joints, pose, time.time(), extra)
 
   def go_home(self) -> str:
     joints = [float(v) for v in self.cfg.robot.home_joints]

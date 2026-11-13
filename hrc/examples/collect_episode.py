@@ -35,6 +35,7 @@ def parse_args():
   parser.add_argument("--lerobot", default=None, help="write a LeRobot v2.1 dataset directory")
   parser.add_argument("--ros2", default=None, help="write a rosbag2 directory")
   parser.add_argument("--enable", action="store_true", help="enable the arm (still no commanded motion)")
+  parser.add_argument("--camera", action="store_true", help="record ELP hand-eye JPEG/mp4")
   parser.add_argument("--ip", default=None)
   return parser.parse_args()
 
@@ -45,7 +46,11 @@ def main() -> int:
   if args.ip:
     kwargs["ip"] = args.ip
   with CS3ASRobot.from_config(**kwargs) as robot:
-    robot.prepare(enable=bool(args.enable), connect_gripper=True)
+    robot.prepare(
+      enable=bool(args.enable),
+      connect_gripper=True,
+      connect_camera=bool(args.camera),
+    )
     rec = EpisodeRecorder(robot, cfg=robot.cfg, task=args.task)
     rec.start(args.task)
     print(f"recording {args.seconds:.1f}s of 30004 / gripper / SafeSkin ...")

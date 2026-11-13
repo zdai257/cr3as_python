@@ -1,23 +1,21 @@
-# Demo programs
+# Demo GUI
 
-IP and ports are read from `config/robot.yaml` (default `192.168.5.1`).
-
-```
-demo/
-├── DobotDemo.py      # control helper
-├── main.py           # CLI demo
-├── ui.py             # Tk GUI
-├── main_UI.py        # GUI entry
-├── z_Cnv_test.py     # conveyor tracking
-├── z_servo_test.py   # ServoP tracking
-└── README.md
-```
+Tk control panel for the CS3AS cell. IP/ports from `config/robot.yaml`.
 
 ```bash
-pip install -r requirements.txt
 cd demo
-python main.py
 python main_UI.py
 ```
 
-Put the robot in TCP mode first. Keep the e-stop reachable for motion demos.
+| Panel | What it does |
+|-------|----------------|
+| Connect | Sockets, then **Take Cell** (TCP + Enable + SafeSkin + gripper attach + camera) |
+| Dashboard | Enable / ClearError / speed / TCP / ResetSafety |
+| HRC | Live SafeSkin bars (proximity / mm), Skin On/Off, gripper Open/Close |
+| Feedback | Joints, Cartesian, DI/DO, errors |
+
+**SafeSkin** works over TCP once the arm is Enabled (queued `EnableSafeSkin` only flushes then).
+
+**Gripper:** Init once with pendant plugin **DHGrip_v2-1-6Stable**. Then Connect / Take Cell / Open / Close. Python does not replace plugin Init (`power_cycle: false`).
+
+Keep the pendant in TCP mode, e-stop reachable.

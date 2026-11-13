@@ -10,12 +10,11 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from hrc.data import Episode, LivePrinter, format_skin, plot_episode  # noqa: E402
+from hrc.data import Episode, LivePrinter, plot_episode  # noqa: E402
 
 
 def parse_args():
@@ -37,17 +36,14 @@ def live(args) -> int:
     kwargs["ip"] = args.ip
   printer = LivePrinter(every=12)
   with CS3ASRobot.from_config(**kwargs) as robot:
-    robot.prepare(enable=False, connect_gripper=False)
-    t0 = time.time()
-    while time.time() - t0 < args.seconds:
-      reading = robot.skins.read()
+    robot.prepare(enable=True, connect_gripper=False)
+    for reading in robot.stream_skins(seconds=args.seconds):
       try:
         joints = robot.current_joints()
         pose = robot.current_pose()
       except Exception:
         joints = pose = None
       printer(reading, joints=joints, pose=pose)
-      time.sleep(0.08)
   return 0
 
 

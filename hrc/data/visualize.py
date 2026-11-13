@@ -25,8 +25,12 @@ def format_skin(reading: SkinReading) -> str:
     p = float(prox[i]) if i < prox.size else 0.0
     a = float(reading.approach[i]) if i < reading.approach.size else 0.0
     d = float(dist[i]) if i < dist.size else 0.0
+    analog = float(reading.analog[i]) if i < reading.analog.size else 0.0
     flag = "HIT" if abs(a) > 0 else "   "
-    lines.append(f"  {name:8s} {ascii_bar(p)}  prox={p:5.2f}  d~{d:5.0f}mm  appr={a:.0f} {flag}")
+    lines.append(
+      f"  {name:8s} {ascii_bar(p)}  prox={p:5.2f}  analog={analog:7.1f}  "
+      f"d~{d:6.1f}mm  appr={a:.0f} {flag}"
+    )
   return "\n".join(lines)
 
 

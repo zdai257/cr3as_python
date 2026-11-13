@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Union
 
 import numpy as np
 
-from .frame import ACTION_NAMES, STATE_NAMES, EpisodeFrame
+from .frame import ACTION_NAMES, STATE_NAMES, CameraSample, EpisodeFrame
 
 ARRAY_KEYS = (
   "timestamp",
@@ -27,6 +27,7 @@ ARRAY_KEYS = (
   "skin_proximity",
   "skin_conductance",
   "skin_analog",
+  "skin_distance_mm",
   "action",
   "robot_mode",
   "collision_state",
@@ -56,6 +57,7 @@ class Episode:
   fps: float = 125.0
   episode_index: int = 0
   extras: Dict[str, Any] = field(default_factory=dict)
+  camera_samples: List[CameraSample] = field(default_factory=list)
 
   def __len__(self) -> int:
     return len(self.frames)
@@ -81,6 +83,21 @@ class Episode:
       return np.zeros((0, 4), dtype=np.float32)
     return np.stack([f.skin_proximity for f in self.frames]).astype(np.float32)
 
+  def skin_analog(self) -> np.ndarray:
+    if not self.frames:
+      return np.zeros((0, 4), dtype=np.float32)
+    return np.stack([f.skin_analog for f in self.frames]).astype(np.float32)
+
+  def skin_distance(self) -> np.ndarray:
+    if not self.frames:
+      return np.zeros((0, 4), dtype=np.float32)
+    return np.stack([f.skin_distance_mm for f in self.frames]).astype(np.float32)
+
+  def skin_approach(self) -> np.ndarray:
+    if not self.frames:
+      return np.zeros((0, 4), dtype=np.float32)
+    return np.stack([f.skin_approach for f in self.frames]).astype(np.float32)
+
   def as_arrays(self) -> Dict[str, np.ndarray]:
     data: Dict[str, np.ndarray] = {}
     if not self.frames:
@@ -99,6 +116,7 @@ class Episode:
     data["skin_proximity"] = np.stack([f.skin_proximity for f in self.frames])
     data["skin_conductance"] = np.stack([f.skin_conductance for f in self.frames])
     data["skin_analog"] = np.stack([f.skin_analog for f in self.frames])
+    data["skin_distance_mm"] = np.stack([f.skin_distance_mm for f in self.frames])
     data["action"] = self.actions()
     data["robot_mode"] = np.asarray([f.robot_mode for f in self.frames], dtype=np.int32)
     data["collision_state"] = np.asarray([f.collision_state for f in self.frames], dtype=np.int32)
@@ -148,6 +166,11 @@ class Episode:
           skin_proximity=np.asarray(packed["skin_proximity"][i], dtype=np.float32),
           skin_conductance=np.asarray(packed["skin_conductance"][i], dtype=np.float32),
           skin_analog=np.asarray(packed["skin_analog"][i], dtype=np.float32),
+          skin_distance_mm=(
+            np.asarray(packed["skin_distance_mm"][i], dtype=np.float32)
+            if "skin_distance_mm" in packed.files
+            else (1.0 - np.clip(np.asarray(packed["skin_proximity"][i], dtype=np.float32), 0.0, 1.0)) * 150.0
+          ),
           action=np.asarray(packed["action"][i], dtype=np.float32),
           robot_mode=int(packed["robot_mode"][i]),
           collision_state=int(packed["collision_state"][i]),
@@ -181,6 +204,8 @@ class Episode:
         skin_proximity=prox,
         skin_conductance=prox,
         skin_approach=(prox > 0.8).astype(np.float32),
+        skin_analog=(prox * 1023.0).astype(np.float32),
+        skin_distance_mm=((1.0 - prox) * 150.0).astype(np.float32),
         action=np.concatenate([joints, np.array([float((i % 11) * 100)], dtype=np.float32)]),
       )
       ep.append(frame)

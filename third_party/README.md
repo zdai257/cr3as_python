@@ -4,7 +4,7 @@
 
 Imported from https://github.com/DH-Robotics/dh_gripper_ros (master snapshot).
 
-Used here for:
+Register map for TCP gripper attach (Init still happens on pendant DHGrip_v2). Used here for:
 
 - PGE / PGEA Modbus-RTU register map (`dh_gripper_driver/.../dh_modbus_gripper.cpp`)
 - ROS1 driver + `dh_gripper_msgs` if you later run a ROS bridge

@@ -46,6 +46,7 @@ class EpisodeFrame:
   skin_proximity: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=np.float32))
   skin_conductance: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=np.float32))
   skin_analog: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=np.float32))
+  skin_distance_mm: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=np.float32))
   action: np.ndarray = field(default_factory=lambda: np.zeros(7, dtype=np.float32))
   robot_mode: int = 0
   collision_state: int = 0
@@ -87,6 +88,7 @@ class EpisodeFrame:
       skin_proximity=_f(skin.proximity if skin else None, 4),
       skin_conductance=_f(skin.conductance if skin else None, 4),
       skin_analog=_f(skin.analog if skin else getattr(status, "skin_analog", None), 4),
+      skin_distance_mm=_f(skin.distance_mm() if skin is not None else None, 4),
       action=act.astype(np.float32),
       robot_mode=int(status.robot_mode),
       collision_state=int(status.collision_state),
@@ -118,7 +120,16 @@ class EpisodeFrame:
       "skin_proximity": self.skin_proximity.tolist(),
       "skin_conductance": self.skin_conductance.tolist(),
       "skin_analog": self.skin_analog.tolist(),
+      "skin_distance_mm": self.skin_distance_mm.tolist(),
       "action": self.action.tolist(),
       "robot_mode": self.robot_mode,
       "collision_state": self.collision_state,
     }
+
+
+@dataclass
+class CameraSample:
+  timestamp: float
+  jpeg: bytes
+  width: int
+  height: int

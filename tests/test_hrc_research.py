@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -23,8 +24,9 @@ from dobot_sdk.protocol.data_types import TEST_VALUE_MAGIC, MyType
 from dobot_sdk.protocol.feedback import FeedbackParser
 
 from hrc.data import Episode, write_lerobot_dataset, write_ros2_bag
-from hrc.gripper import PGEAGripper
+from hrc.gripper import REGISTER_MAPS, PGEAGripper
 from hrc.models import PGEA5026Model
+from hrc.perception.camera import HandEyeCamera
 from hrc.perception.skins import SafeSkinFrontend, SkinReading
 from hrc.utils.kinematics import Kinematics
 from dobot_sdk import load_robot_config
@@ -82,11 +84,14 @@ def test_skins_from_30004():
   assert status.j5_approach_state == 2
   assert status.skin_analog[0] == 100
   assert status.skin_analog[3] == 400
-  reading = SkinReading.from_status(status)
+  reading = SkinReading.from_status(status, analog_max=1023.0)
   assert reading is not None
   assert reading.triggered()
   assert reading.proximity.shape == (4,)
   assert reading.conductance.shape[0] >= 4
+  assert abs(float(reading.proximity[0]) - 100.0 / 1023.0) < 1e-6
+  assert float(reading.proximity[3]) < 0.5
+  assert float(reading.distance_mm()[0]) > 100.0
   print("SafeSkin 30004 parse OK", reading.as_dict())
 
 
@@ -101,6 +106,35 @@ def test_episode_roundtrip():
     lerobot_dir = Path(tmp) / "lerobot"
     write_lerobot_dataset([loaded], lerobot_dir, fps=50.0)
     assert (lerobot_dir / "meta" / "info.json").is_file()
+    info = json.loads((lerobot_dir / "meta" / "info.json").read_text(encoding="utf-8"))
+    for key in (
+      "observation.skins",
+      "observation.skin_analog",
+      "observation.skin_distance",
+      "observation.skin_approach",
+      "data_path",
+      "video_path",
+    ):
+      if key.startswith("observation"):
+        assert key in info["features"], key
+      else:
+        assert key in info, key
+    assert (lerobot_dir / "README.md").is_file()
+    assert (lerobot_dir / "meta" / "episodes_stats.jsonl").is_file()
+    assert loaded.skin_distance().shape == (12, 4)
+    assert loaded.skin_analog().shape == (12, 4)
+    from hrc.data import episode_stats, read_lerobot_episodes, write_replay_html
+
+    roundtrip = read_lerobot_episodes(lerobot_dir)
+    assert len(roundtrip) == 1
+    assert len(roundtrip[0]) == 12
+    html = write_replay_html(roundtrip, Path(tmp) / "replay.html")
+    text = html.read_text(encoding="utf-8")
+    assert "Play" in text
+    assert "CS3AS" in text
+    stats = episode_stats(loaded)
+    assert stats["n_frames"] == 12
+    assert "hit_rate" in stats
     bag = Path(tmp) / "bag"
     write_ros2_bag(loaded, bag)
     assert (bag / "metadata.yaml").is_file()
@@ -243,7 +277,26 @@ def test_skins_and_gripper_status():
   payload = grip.as_dict()
   assert payload["connected"] is False
   assert payload["grip_state_name"] == "disconnected"
+  assert REGISTER_MAPS["dh_ros"]["reg_position"] == 0x0103
+  assert REGISTER_MAPS["dh_ros"]["init_value"] == 0xA5
+  assert grip.map_name == "dh_ros"
+  assert grip.regs["reg_position"] == 0x0103
+  assert cfg.gripper.get("power_cycle") is False
   print("SafeSkin / gripper status dict OK", info["parts"], payload["model"]["name"])
+
+
+def test_handeye_camera_offline():
+  cfg = load_robot_config()
+  cam = HandEyeCamera(cfg)
+  assert cam.device == "/dev/video0"
+  assert cam.width == 1920
+  assert cam.height == 1080
+  payload = cam.as_dict()
+  assert payload["open"] is False
+  assert payload["streaming"] is False
+  none = HandEyeCamera(None)
+  assert none.device == "/dev/video0"
+  print("hand-eye camera config OK", payload["device"], payload["requested"])
 
 
 if __name__ == "__main__":
@@ -253,4 +306,5 @@ if __name__ == "__main__":
   test_episode_roundtrip()
   test_tcp_control_recovery()
   test_skins_and_gripper_status()
+  test_handeye_camera_offline()
   print("All HRC research tests passed")
