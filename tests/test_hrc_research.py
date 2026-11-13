@@ -23,7 +23,15 @@ from dobot_sdk.models.status import RobotMode, RobotStatus
 from dobot_sdk.protocol.data_types import TEST_VALUE_MAGIC, MyType
 from dobot_sdk.protocol.feedback import FeedbackParser
 
-from hrc.data import Episode, write_lerobot_dataset, write_ros2_bag
+from hrc.data import (
+  CameraSample,
+  Episode,
+  EpisodeRecorder,
+  HUB_VIDEO_FPS,
+  resample_episode,
+  write_lerobot_dataset,
+  write_ros2_bag,
+)
 from hrc.gripper import REGISTER_MAPS, PGEAGripper
 from hrc.models import PGEA5026Model
 from hrc.perception.camera import HandEyeCamera
@@ -285,6 +293,144 @@ def test_skins_and_gripper_status():
   print("SafeSkin / gripper status dict OK", info["parts"], payload["model"]["name"])
 
 
+def test_camera_replay_html():
+  from hrc.data.lerobot_io import attach_episode_videos, episode_video_paths
+  from hrc.data.viewer import discover_episodes, write_replay_html
+
+  root = Path(__file__).resolve().parents[1]
+  dest = root / "data" / "lerobot" / "skins"
+  mp4 = dest / "videos" / "chunk-000" / "observation.images.handeye" / "episode_000000.mp4"
+  if not mp4.is_file():
+    print("skip camera replay (no skins mp4)")
+    return
+  found = episode_video_paths(dest, 0)
+  assert "observation.images.handeye" in found
+  episodes = discover_episodes(dest)
+  assert episodes
+  assert episodes[0].videos
+  npz = root / "data" / "episodes" / "skins.npz"
+  if npz.is_file():
+    from hrc.data import Episode
+
+    ep = Episode.load(npz)
+    attach_episode_videos(ep, source_path=npz)
+    assert ep.videos, "skins.npz should pick up data/lerobot/skins hand-eye mp4"
+  with tempfile.TemporaryDirectory() as tmp:
+    html = Path(tmp) / "replay.html"
+    # Copy-style relative links: write beside a fake dataset layout
+    layout = Path(tmp) / "skins"
+    (layout / "videos" / "chunk-000" / "observation.images.handeye").mkdir(parents=True)
+    linked = layout / "videos" / "chunk-000" / "observation.images.handeye" / "episode_000000.mp4"
+    try:
+      linked.symlink_to(mp4)
+    except OSError:
+      linked.write_bytes(mp4.read_bytes()[:64])
+    episodes[0].videos = {"observation.images.handeye": str(linked)}
+    path = write_replay_html(episodes, layout / "replay.html", camera=True)
+    text = path.read_text(encoding="utf-8")
+    assert "<video" in text
+    assert "episode_000000.mp4" in text
+    assert "observation.images.handeye" in text
+    hidden = write_replay_html(episodes, Path(tmp) / "nocam.html", camera=False)
+    assert "episode_000000.mp4" not in hidden.read_text(encoding="utf-8")
+  print("camera replay HTML OK", list(episodes[0].videos))
+
+
+def test_resample_episode_to_camera_fps():
+  ep = Episode.synthetic(n=125, fps=125.0, task="resample")
+  for frame in ep.frames[10:13]:
+    frame.skin_approach[:] = 1.0
+  down = resample_episode(ep, 30.0)
+  assert down.fps == 30.0
+  assert 25 <= len(down) <= 40
+  assert down.states().shape[1] == 17
+  assert down.skin_proximity().shape == (len(down), 4)
+  assert float(np.max(np.abs(down.skin_approach()))) > 0.0
+  print("resample 125→30 Hz OK", len(ep), "->", len(down))
+
+
+def _tiny_jpeg():
+  import shutil
+  import subprocess
+
+  ffmpeg = shutil.which("ffmpeg")
+  if ffmpeg is None:
+    return None
+  with tempfile.TemporaryDirectory() as tmp:
+    path = Path(tmp) / "f.jpg"
+    subprocess.check_call(
+      [
+        ffmpeg,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=green:s=64x64:d=1",
+        "-frames:v",
+        "1",
+        str(path),
+      ]
+    )
+    return path.read_bytes()
+
+
+def test_recorder_hub_export_defaults():
+  from hrc.data.lerobot_io import probe_video
+  from hrc.perception.camera import H264_FOURCCS, open_h264_writer
+
+  rec = EpisodeRecorder(type("Robot", (), {"cfg": None})())
+  assert rec.fps == 125.0
+  assert rec.hub_fps == float(HUB_VIDEO_FPS) == 30.0
+  cfg = load_robot_config()
+  rec_cfg = EpisodeRecorder(type("Robot", (), {"cfg": cfg})(), cfg=cfg)
+  assert rec_cfg.fps == 125.0
+  assert rec_cfg.hub_fps == 30.0
+  assert H264_FOURCCS[0] == "avc1"
+  assert open_h264_writer is not None
+
+  ep = Episode.synthetic(n=125, fps=125.0, task="hub_defaults")
+  rec.episode = ep
+  with tempfile.TemporaryDirectory() as tmp:
+    dest = Path(tmp) / "no_cam"
+    out = rec.export_lerobot(dest, episode=ep)
+    info = json.loads((out / "meta" / "info.json").read_text(encoding="utf-8"))
+    assert info["fps"] == 30
+    assert 25 <= int(info["total_frames"]) <= 40
+    assert int(info["total_videos"]) == 0
+    assert len(ep) == 125
+    assert ep.fps == 125.0
+
+    writer_dir = Path(tmp) / "writer_native"
+    write_lerobot_dataset([ep], writer_dir)
+    winfo = json.loads((writer_dir / "meta" / "info.json").read_text(encoding="utf-8"))
+    assert winfo["fps"] == 125
+    assert int(winfo["total_frames"]) == 125
+
+    jpeg = _tiny_jpeg()
+    if jpeg:
+      t0 = float(ep.timestamps()[0])
+      ep.camera_samples = [
+        CameraSample(timestamp=t0 + i / 30.0, jpeg=jpeg, width=64, height=64) for i in range(30)
+      ]
+      cam_dir = Path(tmp) / "cam"
+      write_lerobot_dataset([ep], cam_dir)
+      cinfo = json.loads((cam_dir / "meta" / "info.json").read_text(encoding="utf-8"))
+      assert cinfo["fps"] == 30
+      assert int(cinfo["total_videos"]) == 1
+      mp4 = cam_dir / "videos" / "chunk-000" / "observation.images.handeye" / "episode_000000.mp4"
+      assert mp4.is_file()
+      probed = probe_video(mp4)
+      codec = str(probed.get("codec") or "").lower()
+      if codec:
+        assert codec in {"h264", "avc1", "libx264"}
+      assert "mp4v" not in codec
+      assert "mpeg4" not in codec
+  print("recorder / Hub export defaults OK")
+
+
 def test_handeye_camera_offline():
   cfg = load_robot_config()
   cam = HandEyeCamera(cfg)
@@ -307,4 +453,7 @@ if __name__ == "__main__":
   test_tcp_control_recovery()
   test_skins_and_gripper_status()
   test_handeye_camera_offline()
+  test_resample_episode_to_camera_fps()
+  test_recorder_hub_export_defaults()
+  test_camera_replay_html()
   print("All HRC research tests passed")

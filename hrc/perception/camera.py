@@ -78,6 +78,27 @@ def encode_rgb_jpeg(rgb: np.ndarray, quality: int = 85) -> Optional[bytes]:
   return bytes(buf)
 
 
+H264_FOURCCS = ("avc1", "H264", "X264")
+
+
+def open_h264_writer(path, fps: float, size):
+  """OpenCV H.264 writer for Hub mp4. Never MPEG-4 `mp4v`.
+
+  Capture stays MJPG on the UVC node; Hub export wants avc1 / yuv420p.
+  Prefer ffmpeg libx264 in `hrc.data.lerobot_io`; this is the OpenCV fallback.
+  """
+  cv2 = _try_cv2()
+  if cv2 is None:
+    return None
+  w, h = int(size[0]), int(size[1])
+  for fourcc in H264_FOURCCS:
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*fourcc), float(fps), (w, h))
+    if writer.isOpened():
+      return writer
+    writer.release()
+  return None
+
+
 class HandEyeCamera:
   """Non-blocking MJPEG capture for the flange / gripper camera."""
 

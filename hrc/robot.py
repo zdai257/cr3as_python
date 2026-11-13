@@ -10,7 +10,6 @@ import numpy as np
 from dobot_sdk import CoordinateType, DobotRobot, load_robot_config
 from dobot_sdk.api.tcp_control import mode_name
 
-from .data.lerobot_io import write_lerobot_dataset
 from .data.recorder import EpisodeRecorder
 from .gripper import PGEAGripper
 from .perception.camera import HandEyeCamera
@@ -244,7 +243,11 @@ class CS3ASRobot(DobotRobot):
     lerobot=None,
     recover: bool = True,
   ):
-    """Record 8 ms SafeSkin + arm state; optionally export LeRobot parquet."""
+    """Record 8 ms SafeSkin + arm state; optionally export LeRobot parquet.
+
+    Native npz is the 30004 bus (~125 Hz). `--lerobot` / `lerobot=` writes
+    Hub-ready 30 FPS H.264 parquet+mp4 (not 125 Hz Hub rows).
+    """
     rec = EpisodeRecorder(self, cfg=self.cfg, fps=125.0, task=task)
     rec.start(task)
     t0 = time.time()
@@ -253,9 +256,7 @@ class CS3ASRobot(DobotRobot):
         self.recover_if_protected()
       time.sleep(0.02)
     path, ep = rec.save()
-    dest = None
-    if lerobot:
-      dest = write_lerobot_dataset([ep], lerobot, fps=ep.fps)
+    dest = rec.export_lerobot(lerobot, episode=ep) if lerobot else None
     return path, ep, dest
 
   def apply_tool_frame(self) -> None:

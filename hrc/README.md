@@ -21,7 +21,10 @@ Pendant: control source **TCP**. SafeSkin plugin on. **DHGrip_v2 → Init** once
 python hrc/examples/stream_skins.py --seconds 20
 python hrc/examples/stream_skins.py --camera --record data/episodes/skins.npz --lerobot data/lerobot/skins
 python hrc/examples/collect_episode.py --seconds 8 --enable --camera --lerobot data/lerobot/demo
+# npz = 125 Hz bus; --lerobot = 30 FPS H.264 parquet+mp4 (Hub)
 python hrc/examples/view_episodes.py data/lerobot/skins --open
+python hrc/examples/view_episodes.py data/lerobot/skins --camera --serve
+python hrc/examples/visualize_episode.py data/lerobot/skins --gui --camera
 ```
 
 `CS3ASRobot.stream_skins()` / `record_skins()` / `query()` are the library entry points. `prepare(enable=True)` so queued `EnableSafeSkin` actually flushes.
@@ -37,7 +40,13 @@ python hrc/examples/view_episodes.py data/episodes --open
 python hrc/examples/visualize_episode.py data/episodes/skins.npz --png /tmp/ep.png
 ```
 
-After `huggingface-cli upload` of that folder, open [lerobot/visualize_dataset](https://huggingface.co/spaces/lerobot/visualize_dataset).
+Upload to the Hub, then open [lerobot/visualize_dataset](https://huggingface.co/spaces/lerobot/visualize_dataset). `YOUR_ORG` is your Hugging Face username or org slug (`huggingface-cli whoami`), not a robot-side setting:
+
+```bash
+python hrc/examples/export_dataset.py data/lerobot/skins --fps 30 --push YOUR_ORG/cs3as-hrc
+# Hub videos must be H.264 (not OpenCV mp4v). Telemetry is undersampled to 30 FPS.
+# https://huggingface.co/spaces/lerobot/visualize_dataset?path=/YOUR_ORG/cs3as-hrc/episode_0
+```
 
 ## Gripper
 

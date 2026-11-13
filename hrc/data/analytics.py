@@ -50,6 +50,8 @@ def episode_stats(episode: Episode) -> dict:
     "joints": _minmax(np.stack([f.joints for f in episode.frames]) if n else np.zeros((0, 6))),
     "gripper": _minmax(np.asarray([f.gripper_position for f in episode.frames], dtype=float)),
     "camera_frames": len(getattr(episode, "camera_samples", None) or []),
+    "cameras": list((getattr(episode, "videos", None) or {}).keys()),
+    "has_video": bool(getattr(episode, "videos", None)),
   }
 
 

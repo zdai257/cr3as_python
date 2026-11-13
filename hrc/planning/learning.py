@@ -9,8 +9,8 @@ Wire a checkpoint later:
 The Observation.as_policy_obs() dict is the stable input contract
 (joints, pose, gripper_position, obstacles, rgb, depth, pointcloud,
 skin_approach, skin_proximity, skin_conductance). Record with
-hrc.data.EpisodeRecorder and export via write_lerobot_dataset /
-write_ros2_bag.
+hrc.data.EpisodeRecorder (125 Hz npz) and export via write_lerobot_dataset
+(30 FPS H.264 Hub parquet+mp4) / write_ros2_bag.
 """
 
 from __future__ import annotations

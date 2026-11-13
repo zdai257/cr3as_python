@@ -7,7 +7,12 @@ Hugging Face dataset repo) and an optional matplotlib GUI.
 from __future__ import annotations
 
 import json
+import os
+import threading
+import time
 import webbrowser
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import List, Optional, Sequence, Union
 
@@ -16,7 +21,7 @@ import numpy as np
 from ..perception.skins import SKIN_PARTS
 from .analytics import dataset_stats, episode_stats
 from .dataset import Episode
-from .lerobot_io import read_lerobot_episodes
+from .lerobot_io import attach_episode_videos, read_lerobot_episodes
 
 HF_VIZ = "https://huggingface.co/spaces/lerobot/visualize_dataset"
 
@@ -24,7 +29,9 @@ HF_VIZ = "https://huggingface.co/spaces/lerobot/visualize_dataset"
 def discover_episodes(path: Union[str, Path]) -> List[Episode]:
   path = Path(path)
   if path.is_file() and path.suffix == ".npz":
-    return [Episode.load(path)]
+    ep = Episode.load(path)
+    attach_episode_videos(ep, source_path=path)
+    return [ep]
   if not path.is_dir():
     raise FileNotFoundError(path)
   if (path / "meta" / "info.json").is_file():
@@ -36,7 +43,9 @@ def discover_episodes(path: Union[str, Path]) -> List[Episode]:
     if f.resolve() in seen:
       continue
     seen.append(f.resolve())
-    out.append(Episode.load(f))
+    ep = Episode.load(f)
+    attach_episode_videos(ep, source_path=f)
+    out.append(ep)
   return out
 
 
@@ -69,12 +78,36 @@ def _payload(episode: Episode, max_points: int = 4000) -> dict:
   }
 
 
+def _video_entries(episode: Episode, dest_dir: Path, include_camera: bool = True) -> list:
+  if not include_camera:
+    return []
+  entries = []
+  for key, raw in dict(getattr(episode, "videos", None) or {}).items():
+    path = Path(raw)
+    if not path.is_file():
+      continue
+    try:
+      src = os.path.relpath(path.resolve(), dest_dir.resolve())
+    except ValueError:
+      src = path.resolve().as_uri()
+    entries.append(
+      {
+        "key": key,
+        "label": key.split(".")[-1],
+        "src": Path(src).as_posix(),
+        "fps": 30.0,
+      }
+    )
+  return entries
+
+
 def write_replay_html(
   episodes: Sequence[Episode],
   dest: Union[str, Path],
   *,
   title: str = "CS3AS episode replay",
   repo_id: Optional[str] = None,
+  camera: bool = True,
 ) -> Path:
   dest = Path(dest)
   dest.parent.mkdir(parents=True, exist_ok=True)
@@ -83,22 +116,76 @@ def write_replay_html(
     "parts": list(SKIN_PARTS),
     "hf_viz": HF_VIZ,
     "repo_id": repo_id or "",
+    "camera": bool(camera),
     "dataset": dataset_stats(episodes),
-    "episodes": [_payload(ep) for ep in episodes],
+    "episodes": [],
   }
+  for ep in episodes:
+    item = _payload(ep)
+    item["videos"] = _video_entries(ep, dest.parent, include_camera=camera)
+    payload["episodes"].append(item)
   blob = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c")
   dest.write_text(_HTML.replace("__PAYLOAD__", blob), encoding="utf-8")
   return dest
 
 
-def open_replay(path: Union[str, Path]) -> None:
-  webbrowser.open(Path(path).resolve().as_uri())
+def open_replay(path: Union[str, Path], *, serve: bool = False, port: int = 0) -> Optional[str]:
+  html = Path(path).resolve()
+  if not serve:
+    webbrowser.open(html.as_uri())
+    return html.as_uri()
+  handler = partial(SimpleHTTPRequestHandler, directory=str(html.parent))
+  httpd = ThreadingHTTPServer(("127.0.0.1", int(port)), handler)
+  url = f"http://127.0.0.1:{httpd.server_address[1]}/{html.name}"
+  thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+  thread.start()
+  webbrowser.open(url)
+  print(f"serving camera replay at {url}")
+  print("Ctrl+C to stop the local server")
+  try:
+    while True:
+      time.sleep(0.4)
+  except KeyboardInterrupt:
+    httpd.shutdown()
+  return url
 
 
-def replay_gui(episode: Episode):
-  """Matplotlib play/scrub window. Requires a display + matplotlib."""
+def _open_video_captures(episode: Episode):
+  """Open every attached mp4 so cameras play together with telemetry."""
+  videos = dict(getattr(episode, "videos", None) or {})
+  if not videos:
+    return []
+  try:
+    import cv2
+  except ImportError:
+    return []
+  opened = []
+  for key, path in videos.items():
+    cap = cv2.VideoCapture(str(path))
+    if cap.isOpened():
+      opened.append((str(key), cap, Path(str(path))))
+    else:
+      cap.release()
+  return opened
+
+
+def _video_frame(cap, t_sec: float):
+  if cap is None:
+    return None
+  import cv2
+
+  cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, float(t_sec) * 1000.0))
+  ok, bgr = cap.read()
+  if not ok or bgr is None:
+    return None
+  return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+
+
+def replay_gui(episode: Episode, *, camera: bool = True):
+  """Matplotlib play/scrub window. Camera pane if an mp4 is attached."""
   try:
     import matplotlib.pyplot as plt
+    from matplotlib.gridspec import GridSpec
     from matplotlib.widgets import Button, Slider
   except ImportError as exc:
     raise RuntimeError("pip install matplotlib") from exc
@@ -113,10 +200,36 @@ def replay_gui(episode: Episode):
   joints = np.stack([f.joints for f in episode.frames])
   grip = np.asarray([f.gripper_position for f in episode.frames], dtype=float)
   stats = episode_stats(episode)
+  captures = _open_video_captures(episode) if camera else []
+  cam_first = []
+  for key, cap, path in captures:
+    rgb = _video_frame(cap, float(t[0]))
+    if rgb is not None:
+      cam_first.append((key, cap, path, rgb))
+  show_cam = bool(cam_first)
+  ncam = len(cam_first)
 
-  fig, axes = plt.subplots(3, 1, figsize=(11, 8), sharex=True)
-  fig.subplots_adjust(bottom=0.18, top=0.9)
+  fig = plt.figure(figsize=(14, 8) if show_cam else (11, 8))
   fig.canvas.manager.set_window_title(f"{episode.task}  {n} frames @ {episode.fps:.0f} Hz")
+  cam_ims = []
+  if show_cam:
+    gs = GridSpec(3, 2, figure=fig, width_ratios=[1.35, 1.0], hspace=0.28, wspace=0.18, bottom=0.18, top=0.9)
+    axes = [fig.add_subplot(gs[i, 0]) for i in range(3)]
+    if ncam == 1:
+      cam_axes = [fig.add_subplot(gs[:, 1])]
+    else:
+      inner = gs[:, 1].subgridspec(ncam, 1, hspace=0.12)
+      cam_axes = [fig.add_subplot(inner[i, 0]) for i in range(ncam)]
+    for ax_cam, (key, cap, path, rgb) in zip(cam_axes, cam_first):
+      im = ax_cam.imshow(rgb)
+      ax_cam.set_axis_off()
+      ax_cam.set_title(key.split(".")[-1])
+      cam_ims.append((im, ax_cam, cap, path, key))
+  else:
+    gs = GridSpec(3, 1, figure=fig, hspace=0.28, bottom=0.18, top=0.9)
+    axes = [fig.add_subplot(gs[i, 0]) for i in range(3)]
+  axes[1].sharex(axes[0])
+  axes[2].sharex(axes[0])
   for i in range(6):
     axes[0].plot(t, joints[:, i], lw=0.9, label=f"J{i+1}")
   axes[0].set_ylabel("joint deg")
@@ -134,9 +247,10 @@ def replay_gui(episode: Episode):
   fig.suptitle(
     f"{episode.task}  {n} frames  {stats['duration_s']}s  "
     f"HIT {stats['hit_frames']} ({100 * stats['hit_rate']:.1f}%)"
+    + (f"  + {ncam} cam" if show_cam else "")
   )
 
-  ax_sl = fig.add_axes([0.12, 0.08, 0.62, 0.04])
+  ax_sl = fig.add_axes([0.12, 0.08, 0.50 if show_cam else 0.62, 0.04])
   slider = Slider(ax_sl, "frame", 0, n - 1, valinit=0, valstep=1)
   playing = {"on": False}
 
@@ -145,6 +259,11 @@ def replay_gui(episode: Episode):
     x = float(t[i])
     for line in vlines:
       line.set_xdata([x, x])
+    for im, ax_cam, cap, path, key in cam_ims:
+      rgb = _video_frame(cap, x)
+      if rgb is not None:
+        im.set_data(rgb)
+        ax_cam.set_title(f"{key.split('.')[-1]}  t={x:.2f}s")
     fig.canvas.draw_idle()
 
   slider.on_changed(seek)
@@ -159,13 +278,15 @@ def replay_gui(episode: Episode):
   timer.add_callback(tick, None)
   timer.start()
 
-  ax_play = fig.add_axes([0.78, 0.07, 0.08, 0.05])
-  ax_stop = fig.add_axes([0.88, 0.07, 0.08, 0.05])
+  ax_play = fig.add_axes([0.70 if show_cam else 0.78, 0.07, 0.08, 0.05])
+  ax_stop = fig.add_axes([0.80 if show_cam else 0.88, 0.07, 0.08, 0.05])
   b_play = Button(ax_play, "Play")
   b_stop = Button(ax_stop, "Pause")
   b_play.on_clicked(lambda _e: playing.__setitem__("on", True))
   b_stop.on_clicked(lambda _e: playing.__setitem__("on", False))
   plt.show()
+  for _im, _ax, cap, _path, _key in cam_ims:
+    cap.release()
   return fig
 
 
@@ -185,6 +306,11 @@ nav{border-right:1px solid var(--line);padding:12px;overflow:auto}
 nav button{display:block;width:100%;text-align:left;background:transparent;color:var(--ink);border:0;padding:8px 10px;border-radius:6px;cursor:pointer}
 nav button.active, nav button:hover{background:var(--panel)}
 section{padding:16px 20px 88px}
+.stage{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,0.9fr);gap:16px;align-items:start}
+.cams{display:flex;flex-direction:column;gap:10px;position:sticky;top:12px}
+.cam-wrap{background:#000;border-radius:8px;overflow:hidden}
+.cam-wrap video{width:100%;display:block;background:#000;max-height:52vh}
+.cam-wrap .cap{padding:6px 10px;color:var(--muted);font-size:12px}
 .stats{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
 .chip{background:var(--panel);padding:8px 10px;border-radius:8px;min-width:110px}
 .chip b{display:block;font-size:16px}
@@ -193,6 +319,8 @@ canvas{width:100%;height:160px;background:var(--panel);border-radius:8px;margin:
 button.ctl{background:var(--acc);color:#062016;border:0;padding:8px 14px;border-radius:6px;font-weight:600;cursor:pointer}
 input[type=range]{flex:1}
 a{color:#7ec8ff}
+.warn{color:#e0b044}
+@media (max-width:1100px){.stage{grid-template-columns:1fr}.cams{position:static}}
 @media (max-width:800px){main{grid-template-columns:1fr} nav{display:flex;overflow:auto} .dock{left:0}}
 </style>
 </head>
@@ -202,19 +330,30 @@ a{color:#7ec8ff}
   <span class="muted" id="summary"></span>
   <span class="muted">Hugging Face:
     <a id="hf" href="https://huggingface.co/spaces/lerobot/visualize_dataset" target="_blank">lerobot/visualize_dataset</a>
-    (push this folder with <code>meta/info.json</code> + parquet)
+    (push this folder with <code>meta/info.json</code> + parquet + videos)
   </span>
 </header>
 <main>
   <nav id="list"></nav>
   <section>
     <div class="stats" id="stats"></div>
-    <div class="muted">SafeSkin proximity / analog (HIT frames in red)</div>
-    <canvas id="c-skin" height="160"></canvas>
-    <div class="muted">Joints</div>
-    <canvas id="c-j" height="160"></canvas>
-    <div class="muted">Gripper 0–1000 + XYZ</div>
-    <canvas id="c-g" height="160"></canvas>
+    <div class="stage">
+      <div>
+        <div class="muted">SafeSkin proximity / analog (HIT frames in red)</div>
+        <canvas id="c-skin" height="160"></canvas>
+        <div class="muted">Joints</div>
+        <canvas id="c-j" height="160"></canvas>
+        <div class="muted">Gripper 0–1000 + XYZ</div>
+        <canvas id="c-g" height="160"></canvas>
+      </div>
+      <div class="cams" id="cams"></div>
+    </div>
+    <template id="cam-tpl">
+      <div class="cam-wrap">
+        <video class="cam" muted playsinline preload="auto"></video>
+        <div class="cap"></div>
+      </div>
+    </template>
   </section>
 </main>
 <div class="dock">
@@ -233,25 +372,74 @@ if (DATA.repo_id) {
   document.getElementById('hf').href = DATA.hf_viz + '?path=' + encodeURIComponent(DATA.repo_id) + '/0';
 }
 const list = document.getElementById('list');
-let cur = 0, frame = 0, playing = false, last = 0;
+let cur = 0, frame = 0, playing = false, last = 0, syncing = false;
 DATA.episodes.forEach((ep,i) => {
   const b = document.createElement('button');
-  b.textContent = (i+1) + '. ' + ep.task + '  n=' + ep.n_frames;
+  const ncam = (ep.videos||[]).length;
+  b.textContent = (i+1) + '. ' + ep.task + '  n=' + ep.n_frames + (ncam? '  cam×'+ncam : '');
   b.onclick = () => select(i);
   list.appendChild(b);
 });
+function videos(){ return [...document.querySelectorAll('video.cam')]; }
+function master(){ return videos()[0] || null; }
+function timeToFrame(ep, tsec){
+  const tt = ep.t || [];
+  if (!tt.length) return 0;
+  let i = 0;
+  while (i < tt.length-1 && tt[i+1] <= tsec) i++;
+  while (i > 0 && tt[i] > tsec) i--;
+  return i;
+}
+function mountCams(ep){
+  const box = document.getElementById('cams');
+  box.innerHTML = '';
+  const clips = ep.videos || [];
+  if (!clips.length){
+    box.innerHTML = '<div class="muted">No camera mp4 on this episode. Record with <code>--camera</code> or open <code>data/lerobot/skins</code>. If the video is present but blank, re-run with <code>--serve</code>.</div>';
+    return;
+  }
+  const tpl = document.getElementById('cam-tpl');
+  clips.forEach(clip => {
+    const node = tpl.content.cloneNode(true);
+    const v = node.querySelector('video');
+    const cap = node.querySelector('.cap');
+    v.src = clip.src;
+    v.preload = 'auto';
+    v.playsInline = true;
+    v.muted = true;
+    v.controls = false;
+    cap.textContent = clip.label + '  ' + clip.src;
+    box.appendChild(node);
+    v.addEventListener('error', () => {
+      cap.innerHTML = '<span class="warn">failed to load '+clip.src+' — use --serve so the browser can read the mp4</span>';
+    });
+  });
+}
+function seekVideos(tsec){
+  syncing = true;
+  videos().forEach(v => {
+    if (v.readyState < 1) return;
+    if (Math.abs((v.currentTime||0) - tsec) > 0.05) v.currentTime = Math.max(0, tsec);
+  });
+  syncing = false;
+}
 function select(i){
   cur = i; frame = 0; playing = false;
+  document.getElementById('play').textContent = 'Play';
+  videos().forEach(v => v.pause());
   [...list.children].forEach((el,k)=>el.classList.toggle('active', k===i));
   const ep = DATA.episodes[i], s = ep.stats;
+  const ncam = (ep.videos||[]).length;
   document.getElementById('stats').innerHTML = [
     ['frames', s.n_frames], ['fps', s.fps], ['dur s', s.duration_s],
     ['HIT', s.hit_frames + ' / ' + (100*s.hit_rate).toFixed(1) + '%'],
-    ['collision', s.collision_frames], ['cam', s.camera_frames]
+    ['collision', s.collision_frames],
+    ['cameras', ncam || (s.cameras||[]).length || s.camera_frames]
   ].map(([k,v]) => '<div class="chip"><span class="muted">'+k+'</span><b>'+v+'</b></div>').join('');
   document.getElementById('scrub').max = Math.max(0, ep.t.length-1);
   document.getElementById('scrub').value = 0;
-  draw();
+  mountCams(ep);
+  draw(true);
 }
 function series(canvas, t, ys, colors, hit){
   const ctx = canvas.getContext('2d');
@@ -273,12 +461,11 @@ function series(canvas, t, ys, colors, hit){
     y.forEach((v,i)=>{ const X=x(i), yy=Y(v); i?ctx.lineTo(X,yy):ctx.moveTo(X,yy); });
     ctx.stroke();
   });
-  const ep = DATA.episodes[cur];
   const xf = x(frame);
   ctx.strokeStyle='#e7eef7'; ctx.setLineDash([4,3]);
   ctx.beginPath(); ctx.moveTo(xf,0); ctx.lineTo(xf,h); ctx.stroke(); ctx.setLineDash([]);
 }
-function draw(){
+function draw(seekCam){
   const ep = DATA.episodes[cur];
   if (!ep) return;
   const hit = (ep.approach||[]).map(r => r.some(v => Math.abs(v)>0)?1:0);
@@ -292,19 +479,41 @@ function draw(){
   const xyz = [0,1,2].map(k => (ep.pose||[]).map(r=>r[k]||0));
   series(document.getElementById('c-g'), ep.t, g.concat(xyz), ['#d67ad3','#7ec8ff','#3dbe8c','#e0b044']);
   document.getElementById('clock').textContent = (ep.t[frame]||0).toFixed(3)+' s  #'+frame;
+  if (seekCam !== false) seekVideos(ep.t[frame]||0);
 }
 document.getElementById('play').onclick = () => {
   playing = !playing;
   document.getElementById('play').textContent = playing ? 'Pause' : 'Play';
   last = performance.now();
-};
-document.getElementById('scrub').oninput = e => { frame = +e.target.value; draw(); };
-function loop(now){
+  const v = master();
   if (playing) {
-    const ep = DATA.episodes[cur];
-    const dt = (now-last)/1000;
-    const step = Math.max(1, Math.round(dt * (ep.fps||30) / (ep.step||1)));
-    if (step>=1){ frame = (frame+step) % ep.t.length; last = now; document.getElementById('scrub').value=frame; draw(); }
+    if (v) v.play().catch(()=>{});
+    videos().slice(1).forEach(el => el.play().catch(()=>{}));
+  } else {
+    videos().forEach(el => el.pause());
+  }
+};
+document.getElementById('scrub').oninput = e => {
+  frame = +e.target.value;
+  videos().forEach(v => v.pause());
+  playing = false;
+  document.getElementById('play').textContent = 'Play';
+  draw(true);
+};
+function loop(now){
+  const ep = DATA.episodes[cur];
+  if (playing && ep) {
+    const v = master();
+    if (v && !v.paused && v.readyState >= 2) {
+      frame = timeToFrame(ep, v.currentTime || 0);
+      document.getElementById('scrub').value = frame;
+      draw(false);
+      if (v.ended) { playing = false; document.getElementById('play').textContent = 'Play'; }
+    } else {
+      const dt = (now-last)/1000;
+      const step = Math.max(1, Math.round(dt * (ep.fps||30) / (ep.step||1)));
+      if (step>=1){ frame = (frame+step) % ep.t.length; last = now; document.getElementById('scrub').value=frame; draw(true); }
+    }
   }
   requestAnimationFrame(loop);
 }

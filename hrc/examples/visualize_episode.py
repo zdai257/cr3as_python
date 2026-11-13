@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""Plot a recorded episode (npz) or print a live SafeSkin stream.
+"""Plot a recorded episode (npz / LeRobot folder) or print a live SafeSkin stream.
 
-  python hrc/examples/visualize_episode.py data/episodes/episode_0000.npz
+Camera mp4s play concurrently in --gui / the HTML player (default on).
+
+  python hrc/examples/visualize_episode.py data/episodes/skins.npz --gui --camera
+  python hrc/examples/visualize_episode.py data/lerobot/skins --gui
+  python hrc/examples/visualize_episode.py data/episodes/skins.npz --png /tmp/ep.png
   python hrc/examples/visualize_episode.py --live --seconds 10
 """
 
@@ -14,14 +18,25 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
+from pathlib import Path  # noqa: E402
+
 from hrc.data import Episode, LivePrinter, plot_episode  # noqa: E402
+from hrc.data.lerobot_io import attach_episode_videos  # noqa: E402
+from hrc.data.viewer import discover_episodes, replay_gui  # noqa: E402
 
 
 def parse_args():
   parser = argparse.ArgumentParser(description="Visualise CS3AS episode / skins")
-  parser.add_argument("episode", nargs="?", help="path to episode_XXXX.npz")
+  parser.add_argument("episode", nargs="?", help="path to episode npz or LeRobot folder")
   parser.add_argument("--png", default=None, help="save matplotlib figure")
   parser.add_argument("--show", action="store_true")
+  parser.add_argument("--gui", action="store_true", help="play/scrub window with optional camera pane")
+  parser.add_argument(
+    "--camera",
+    action=argparse.BooleanOptionalAction,
+    default=True,
+    help="show hand-eye video next to telemetry (default: on when an mp4 exists)",
+  )
   parser.add_argument("--live", action="store_true")
   parser.add_argument("--seconds", type=float, default=8.0)
   parser.add_argument("--ip", default=None)
@@ -52,10 +67,25 @@ def main() -> int:
   if args.live:
     return live(args)
   if not args.episode:
-    print("pass an episode npz or use --live")
+    print("pass an episode npz / LeRobot folder or use --live")
     return 2
-  ep = Episode.load(args.episode)
-  print(f"{ep.task}  frames={len(ep)}  fps={ep.fps}")
+  src = Path(args.episode)
+  if src.is_dir():
+    episodes = discover_episodes(src)
+    if not episodes:
+      print(f"no episodes in {src}")
+      return 2
+    ep = episodes[0]
+  else:
+    ep = Episode.load(src)
+    attach_episode_videos(ep, source_path=src)
+  cams = list((ep.videos or {}).keys())
+  print(f"{ep.task}  frames={len(ep)}  fps={ep.fps}" + (f"  cameras={cams}" if cams else "  cameras=none"))
+  if args.camera and not cams:
+    print("no camera mp4 attached; pass data/lerobot/skins or record with --camera")
+  if args.gui:
+    replay_gui(ep, camera=bool(args.camera))
+    return 0
   if ep.frames:
     from hrc.perception.skins import SkinReading
 

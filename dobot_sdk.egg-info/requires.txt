@@ -7,3 +7,7 @@ pytest-cov>=2.0
 
 [gui]
 numpy>=1.19.0
+
+[research]
+matplotlib>=3.4
+pyarrow>=10.0

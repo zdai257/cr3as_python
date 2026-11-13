@@ -6,7 +6,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 
@@ -58,6 +58,7 @@ class Episode:
   episode_index: int = 0
   extras: Dict[str, Any] = field(default_factory=dict)
   camera_samples: List[CameraSample] = field(default_factory=list)
+  videos: Dict[str, str] = field(default_factory=dict)
 
   def __len__(self) -> int:
     return len(self.frames)
@@ -131,6 +132,7 @@ class Episode:
       "n_frames": len(self.frames),
       "state_names": list(STATE_NAMES),
       "action_names": list(ACTION_NAMES),
+      "videos": dict(self.videos),
       "extras": self.extras,
     }
 
@@ -183,6 +185,7 @@ class Episode:
       fps=float(meta.get("fps", 125.0)),
       episode_index=int(meta.get("episode_index", 0)),
       extras=dict(meta.get("extras") or {}),
+      videos={str(k): str(v) for k, v in dict(meta.get("videos") or {}).items()},
     )
 
   @classmethod
@@ -210,6 +213,111 @@ class Episode:
       )
       ep.append(frame)
     return ep
+
+
+def resample_episode(
+  episode: Episode,
+  fps: float,
+  n_frames: Optional[int] = None,
+) -> Episode:
+  """Put joints / SafeSkin onto a regular grid (Hub datasets want camera fps).
+
+  Linear interpolation for continuous signals. HIT / approach and collision
+  use a max-pool over each output bin so a brief contact is not dropped.
+  """
+  fps = float(fps)
+  src_n = len(episode)
+  if src_n == 0:
+    out = Episode(
+      task=episode.task,
+      robot_type=episode.robot_type,
+      fps=fps,
+      episode_index=episode.episode_index,
+      extras=dict(episode.extras),
+      videos=dict(episode.videos),
+      camera_samples=list(episode.camera_samples),
+    )
+    return out
+  ts = episode.timestamps().astype(np.float64)
+  t = ts - ts[0]
+  duration = float(t[-1]) if src_n > 1 else 0.0
+  if n_frames is None:
+    if duration <= 0:
+      n_frames = 1
+    else:
+      n_frames = max(1, int(round(duration * fps)))
+      if (n_frames - 1) / max(fps, 1e-9) < duration - 0.5 / fps:
+        n_frames = int(np.floor(duration * fps + 1e-9)) + 1
+  n_frames = max(1, int(n_frames))
+  t_new = np.arange(n_frames, dtype=np.float64) / fps
+
+  def interp_1d(values, *, kind: str = "linear"):
+    y = np.asarray(values, dtype=np.float64).reshape(src_n, -1)
+    cols = y.shape[1]
+    out = np.empty((n_frames, cols), dtype=np.float64)
+    half = 0.5 / max(fps, 1e-6)
+    for c in range(cols):
+      if kind == "max":
+        for i, tn in enumerate(t_new):
+          mask = (t >= tn - half) & (t <= tn + half)
+          out[i, c] = float(np.max(y[mask, c])) if np.any(mask) else float(np.interp(tn, t, y[:, c]))
+      else:
+        out[:, c] = np.interp(t_new, t, y[:, c])
+    return out
+
+  joints = interp_1d([f.joints for f in episode.frames])
+  joints_target = interp_1d([f.joints_target for f in episode.frames])
+  joint_vel = interp_1d([f.joint_vel for f in episode.frames])
+  pose = interp_1d([f.pose for f in episode.frames])
+  pose_target = interp_1d([f.pose_target for f in episode.frames])
+  tcp_vel = interp_1d([f.tcp_vel for f in episode.frames])
+  grip = interp_1d([f.gripper_position for f in episode.frames]).reshape(-1)
+  grip_cmd = interp_1d([f.gripper_command for f in episode.frames]).reshape(-1)
+  prox = interp_1d([f.skin_proximity for f in episode.frames])
+  analog = interp_1d([f.skin_analog for f in episode.frames])
+  dist = interp_1d([f.skin_distance_mm for f in episode.frames])
+  cond = interp_1d([f.skin_conductance for f in episode.frames])
+  approach = interp_1d([f.skin_approach for f in episode.frames], kind="max")
+  collision = interp_1d([[float(f.collision_state)] for f in episode.frames], kind="max").reshape(-1)
+  nearest = np.abs(t[:, None] - t_new[None, :]).argmin(axis=0)
+  action = interp_1d([f.action for f in episode.frames])
+  t0 = float(ts[0])
+  frames = []
+  for i in range(n_frames):
+    src = episode.frames[int(nearest[i])]
+    frames.append(
+      EpisodeFrame(
+        timestamp=t0 + float(t_new[i]),
+        timestamp_ms=int(round((t0 + float(t_new[i])) * 1000.0)),
+        joints=joints[i].astype(np.float32),
+        joints_target=joints_target[i].astype(np.float32),
+        joint_vel=joint_vel[i].astype(np.float32),
+        pose=pose[i].astype(np.float32),
+        pose_target=pose_target[i].astype(np.float32),
+        tcp_vel=tcp_vel[i].astype(np.float32),
+        gripper_position=float(grip[i]),
+        gripper_command=float(grip_cmd[i]),
+        skin_approach=approach[i].astype(np.float32),
+        skin_proximity=prox[i].astype(np.float32),
+        skin_conductance=cond[i].astype(np.float32),
+        skin_analog=analog[i].astype(np.float32),
+        skin_distance_mm=dist[i].astype(np.float32),
+        action=action[i].astype(np.float32),
+        robot_mode=int(src.robot_mode),
+        collision_state=int(collision[i] > 0.5),
+        extra=dict(src.extra),
+      )
+    )
+  return Episode(
+    frames=frames,
+    task=episode.task,
+    robot_type=episode.robot_type,
+    fps=fps,
+    episode_index=episode.episode_index,
+    extras=dict(episode.extras),
+    camera_samples=list(episode.camera_samples),
+    videos=dict(episode.videos),
+  )
 
 
 def next_episode_path(directory: Union[str, Path], prefix: str = "episode") -> Path:

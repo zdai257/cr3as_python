@@ -8,17 +8,39 @@ from typing import Optional
 
 from .dataset import Episode, default_dataset_dir, next_episode_path
 from .frame import CameraSample, EpisodeFrame
+from .lerobot_io import HUB_VIDEO_FPS, write_lerobot_dataset
+
+
+def _learning_value(learning, name, default):
+  if learning is None:
+    return default
+  if hasattr(learning, "get"):
+    value = learning.get(name, default)
+  else:
+    value = getattr(learning, name, default)
+  return default if value is None else value
 
 
 class EpisodeRecorder:
-  def __init__(self, robot, cfg=None, fps: Optional[float] = None, task: Optional[str] = None):
+  def __init__(
+    self,
+    robot,
+    cfg=None,
+    fps: Optional[float] = None,
+    hub_fps: Optional[float] = None,
+    task: Optional[str] = None,
+  ):
     self.robot = robot
     self.cfg = cfg or getattr(robot, "cfg", None)
     learning = None
     if self.cfg is not None and hasattr(self.cfg, "hrc"):
       learning = getattr(self.cfg.hrc, "learning", None)
-    self.fps = float(fps if fps is not None else (learning.fps if learning else 125.0))
-    self.task = str(task if task is not None else (learning.task if learning else "cs3as_hrc"))
+    # Native npz stays on the 30004 bus (~125 Hz). Hub parquet/mp4 uses hub_fps.
+    self.fps = float(fps if fps is not None else _learning_value(learning, "fps", 125.0))
+    self.hub_fps = float(
+      hub_fps if hub_fps is not None else _learning_value(learning, "hub_fps", HUB_VIDEO_FPS)
+    )
+    self.task = str(task if task is not None else _learning_value(learning, "task", "cs3as_hrc"))
     self.episode = Episode(task=self.task, fps=self.fps)
     self._lock = threading.Lock()
     self._running = False
@@ -57,7 +79,8 @@ class EpisodeRecorder:
     if cam is None or not getattr(cam, "is_open", False):
       return
     now = time.time()
-    period = 1.0 / max(float(getattr(cam, "actual_fps", 0) or getattr(cam, "fps", 0) or 30.0), 1.0)
+    cam_fps = float(getattr(cam, "actual_fps", 0) or getattr(cam, "fps", 0) or self.hub_fps or 30.0)
+    period = 1.0 / max(cam_fps, 1.0)
     if now - self._cam_t < period:
       return
     frame = cam.latest()
@@ -147,3 +170,17 @@ class EpisodeRecorder:
       path = next_episode_path(default_dataset_dir(self.cfg))
     ep.save(path)
     return path, ep
+
+  def export_lerobot(self, dest, episode: Optional[Episode] = None):
+    """Write a Hub-ready LeRobot folder (30 FPS H.264). Native npz is unchanged.
+
+    Does not pass `fps=episode.fps` (125). With camera samples the writer already
+    resamples telemetry onto `video_fps`; without a camera, parquet still uses
+    `hub_fps` so Hub rows are not 125 Hz.
+    """
+    ep = episode if episode is not None else self.episode
+    has_video = bool(getattr(ep, "camera_samples", None)) or bool(getattr(ep, "videos", None))
+    kwargs = {"video_fps": float(self.hub_fps)}
+    if not has_video:
+      kwargs["fps"] = float(self.hub_fps)
+    return write_lerobot_dataset([ep], dest, **kwargs)

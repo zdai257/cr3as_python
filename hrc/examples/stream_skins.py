@@ -5,9 +5,11 @@ Sensing is always the 30004 rate (~125 Hz / 8 ms). Console printing is
 downsampled unless --native. Analog channels are the 61 reserved bytes
 after the I8 HIT flags; I8 itself is typically a 0/1 pause flag.
 
+Native `--record` npz stays 125 Hz. `--lerobot` is Hub-ready 30 FPS H.264.
+
   python hrc/examples/stream_skins.py --seconds 20
   python hrc/examples/stream_skins.py --native --record data/episodes/skins.npz
-  python hrc/examples/stream_skins.py --lerobot data/lerobot/skins --camera
+  python hrc/examples/stream_skins.py --camera --record data/episodes/skins.npz --lerobot data/lerobot/skins
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from hrc.data import EpisodeRecorder, write_lerobot_dataset  # noqa: E402
+from hrc.data import EpisodeRecorder  # noqa: E402
 from hrc.data.visualize import format_skin  # noqa: E402
 from hrc.robot import CS3ASRobot  # noqa: E402
 
@@ -47,9 +49,13 @@ def main() -> int:
   )
   parser.add_argument("--native", action="store_true", help="print every 8 ms sample")
   parser.add_argument("--ip", default=None)
-  parser.add_argument("--record", default=None, help="save episode npz")
-  parser.add_argument("--lerobot", default=None, help="export LeRobot v2.1 parquet dir")
-  parser.add_argument("--camera", action="store_true", help="also open /dev/video0")
+  parser.add_argument("--record", default=None, help="save episode npz at 125 Hz")
+  parser.add_argument(
+    "--lerobot",
+    default=None,
+    help="export Hub-ready LeRobot v2.1 (30 FPS H.264; not 125 Hz parquet)",
+  )
+  parser.add_argument("--camera", action="store_true", help="also open /dev/video0 (~30 FPS JPEG)")
   parser.add_argument(
     "--firmware-safety",
     action="store_true",
@@ -117,10 +123,10 @@ def main() -> int:
         print()
     if rec is not None:
       path, ep = rec.save(args.record)
-      print(f"saved {len(ep)} frames @ {ep.fps:.0f} Hz -> {path}")
+      print(f"saved {len(ep)} frames @ {ep.fps:.0f} Hz npz -> {path}")
       if args.lerobot:
-        dest = write_lerobot_dataset([ep], args.lerobot, fps=ep.fps)
-        print(f"lerobot dataset -> {dest}")
+        dest = rec.export_lerobot(args.lerobot, episode=ep)
+        print(f"lerobot dataset (H.264 / {rec.hub_fps:.0f} FPS) -> {dest}")
     robot.shutdown(disable=False, skins_off=True)
   return 0
 

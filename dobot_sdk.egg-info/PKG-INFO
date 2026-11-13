@@ -29,6 +29,9 @@ Requires-Dist: pytest>=6.0; extra == "dev"
 Requires-Dist: pytest-cov>=2.0; extra == "dev"
 Provides-Extra: gui
 Requires-Dist: numpy>=1.19.0; extra == "gui"
+Provides-Extra: research
+Requires-Dist: matplotlib>=3.4; extra == "research"
+Requires-Dist: pyarrow>=10.0; extra == "research"
 Dynamic: license-file
 
 <div align="center">
@@ -86,8 +89,10 @@ from dobot_sdk import DobotRobot
 **Directory Structure Requirement:**
 ```
 TCP-IP-Python-V4-main/
+├── config/robot.yaml           ← shared IP / payload / HRC waypoints
 ├── dobot_sdk/                  ← SDK core package
-├── examples/                   ← Examples directory (place your script here)
+├── hrc/                        ← CS3AS pick-and-place + planners
+├── examples/                   ← examples (place your script here)
 │   └── your_script.py
 └── README.md
 ```
@@ -113,7 +118,7 @@ pip show dobot_sdk
 
 | Config | Description |
 |--------|-------------|
-| **Robot IP** | 192.168.1.100 (default) |
+| **Robot IP** | 192.168.5.1 (see `config/robot.yaml`) |
 | **Dashboard Port** | 29999 |
 | **Feedback Port** | 30004/30005/30006 |
 | **PC IP** | Must be in 192.168.X.X subnet |
@@ -127,10 +132,8 @@ pip show dobot_sdk
 ```python
 from dobot_sdk import DobotRobot
 
-ROBOT_IP = "192.168.1.100"
-
-# Using context manager (Recommended)
-with DobotRobot(ROBOT_IP) as robot:
+# IP and ports come from config/robot.yaml (default 192.168.5.1)
+with DobotRobot.from_config() as robot:
     # Initialization
     robot.robot_control.RequestControl()
     robot.robot_control.ClearError()
@@ -149,7 +152,7 @@ with DobotRobot(ROBOT_IP) as robot:
 from dobot_sdk import DobotRobot
 from dobot_sdk import CoordinateType
 
-with DobotRobot("192.168.1.100") as robot:
+with DobotRobot.from_config() as robot:
     robot.robot_control.RequestControl()
     robot.robot_control.EnableRobot()
 
@@ -171,7 +174,7 @@ with DobotRobot("192.168.1.100") as robot:
 ```python
 from dobot_sdk import DobotRobot
 
-with DobotRobot("192.168.1.100") as robot:
+with DobotRobot.from_config() as robot:
     robot.robot_control.EnableRobot()
 
     # Digital output (per arm SDK docs: DO(index, status))
@@ -187,16 +190,36 @@ with DobotRobot("192.168.1.100") as robot:
 ## Running Examples
 
 ```bash
-# Run example code
-cd examples
-python 01_basic_connection.py
-python 02_motion_control.py
-python 03_error_monitor.py
+# SDK samples (IP from config/robot.yaml, default 192.168.5.1)
+python examples/01_basic_connection.py
+python examples/02_motion_control.py
 
-# Run GUI
-cd demo
-python main_UI.py
+# CS3AS HRC cell (SafeSkin, camera, datasets)
+python hrc/examples/stream_skins.py --seconds 20
+python hrc/examples/view_episodes.py data/lerobot/skins --open
+python hrc/examples/pick_and_place.py --compare
+
+# GUI (Enable + SafeSkin; gripper after pendant DHGrip Init)
+python demo/main_UI.py
 ```
+
+---
+
+## CS3AS HRC modules
+
+This tree adds a research cell on top of `dobot_sdk`. Details: [`hrc/README.md`](hrc/README.md), [`demo/README.md`](demo/README.md), [`data/README.md`](data/README.md).
+
+| Path | Use |
+|------|-----|
+| `config/robot.yaml` | IP, payload, SafeSkin, gripper, camera, waypoints |
+| `hrc/robot.py` | `CS3ASRobot` — TCP, skins, gripper attach, hand-eye `query()` |
+| `hrc/perception/` | SafeSkin 125 Hz, ELP `/dev/video0`, oracle obstacles |
+| `hrc/data/` | Record npz / LeRobot parquet, HTML replay, HF dataset card |
+| `hrc/planning/` | Linear, RRT*, APF, learning stub |
+| `demo/main_UI.py` | Tk panel for arm + skins (+ gripper after plugin Init) |
+| `models/pgea_50_26/` | Gripper URDF / TCP z=118 mm |
+
+Pendant: TCP control source. **DHGrip_v2 Init** once before Python Open/Close. SafeSkin stream: `robot.stream_skins()`. Replay: `python hrc/examples/view_episodes.py`. Hugging Face: push `data/lerobot/<name>/` and open [lerobot/visualize_dataset](https://huggingface.co/spaces/lerobot/visualize_dataset).
 
 ---
 
@@ -204,6 +227,11 @@ python main_UI.py
 
 ```
 TCP-IP-Python-V4-main/
+├── config/robot.yaml       # Shared robot / cell parameters
+├── hrc/                    # CS3AS HRC: skins, camera, datasets, planners
+├── models/pgea_50_26/      # DH PGEA-50-26 URDF + meshes (TCP z=118 mm)
+├── third_party/dh_gripper_ros/  # DHGrip register-map reference
+├── data/                   # episodes (npz) + lerobot/ (parquet, replay.html)
 ├── dobot_sdk/              # SDK Core Package
 │   ├── api/                # API Interface Layer
 │   ├── core/               # Core Communication Layer
@@ -275,8 +303,7 @@ log_dir = get_log_directory()  # Returns: dobot_sdk/logs/
 from dobot_sdk import DobotRobot
 
 # Create robot with custom timeout settings
-robot = DobotRobot(
-    "192.168.1.100",
+robot = DobotRobot.from_config(
     connect_timeout=10.0,   # Connection timeout in seconds
     receive_timeout=15.0    # Receive timeout in seconds
 )

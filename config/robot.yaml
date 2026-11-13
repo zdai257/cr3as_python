@@ -108,7 +108,8 @@ hrc:
     checkpoint: null        # path to a future policy / VLA checkpoint
     device: "cpu"
     dataset_dir: "data/episodes"
-    fps: 125                # port 30004 is 8 ms
+    fps: 125                # native npz / port 30004 is 8 ms
+    hub_fps: 30             # LeRobot parquet + H.264 (Hub); do not use 125 Hz Hub rows
     task: "cs3as_hrc"
   # Cartesian mm,deg. null = not taught yet.
   waypoints:

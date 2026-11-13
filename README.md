@@ -160,6 +160,7 @@ python examples/02_motion_control.py
 
 # CS3AS HRC cell (SafeSkin, camera, datasets)
 python hrc/examples/stream_skins.py --seconds 20
+python hrc/examples/collect_episode.py --seconds 8 --enable --camera --lerobot data/lerobot/demo
 python hrc/examples/view_episodes.py data/lerobot/skins --open
 python hrc/examples/pick_and_place.py --compare
 
@@ -178,7 +179,7 @@ This tree adds a research cell on top of `dobot_sdk`. Details: [`hrc/README.md`]
 | `config/robot.yaml` | IP, payload, SafeSkin, gripper, camera, waypoints |
 | `hrc/robot.py` | `CS3ASRobot` — TCP, skins, gripper attach, hand-eye `query()` |
 | `hrc/perception/` | SafeSkin 125 Hz, ELP `/dev/video0`, oracle obstacles |
-| `hrc/data/` | Record npz / LeRobot parquet, HTML replay, HF dataset card |
+| `hrc/data/` | Record 125 Hz npz / 30 FPS H.264 LeRobot parquet, HTML replay, HF card |
 | `hrc/planning/` | Linear, RRT*, APF, learning stub |
 | `demo/main_UI.py` | Tk panel for arm + skins (+ gripper after plugin Init) |
 | `models/pgea_50_26/` | Gripper URDF / TCP z=118 mm |
