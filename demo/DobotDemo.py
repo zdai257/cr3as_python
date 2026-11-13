@@ -39,12 +39,10 @@ class DobotDemo:
       # Use the new SDK
       self.robot = DobotRobot(self.ip)
       self.robot.Connect()
-      
-      # Request TCP control mode
-      self.robot.robot_control.RequestControl()
-      
-      # Clear alarms
-      self.robot.robot_control.ClearError()
+
+      self.robot.StartFeedbackMonitor(callback=self._feed_callback)
+      sleep(0.3)
+      self.robot.take_tcp_control()
       
       # Enable robot
       response = self.robot.robot_control.EnableRobot()
@@ -52,9 +50,6 @@ class DobotDemo:
         print("Enable failed: is port 29999 busy?")
         return
       print("Enable OK")
-
-      # Start feedback thread
-      self.robot.StartFeedbackMonitor(callback=self._feed_callback)
       sleep(1)
 
       # Two target points

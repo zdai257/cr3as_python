@@ -19,6 +19,14 @@ from .communication import Communication
 from .plugins import Plugins
 from .robot_control import RobotControl
 from .error_controller import ErrorController
+from .tcp_control import (
+  ensure_enabled,
+  in_tcp_mode,
+  mode_name,
+  reset_safety,
+  robot_mode,
+  take_tcp_control,
+)
 
 logger = logging.getLogger("dobot_sdk")
 
@@ -233,6 +241,36 @@ class DobotRobot:
     """
     return self._latest_status
 
+  def RobotModeValue(self) -> int:
+    """Parsed RobotMode() integer (0-11), or 0 if unknown."""
+    return robot_mode(self)
+
+  def InTcpMode(self) -> bool:
+    """True when dashboard commands are accepted (TCP owns the controller)."""
+    return in_tcp_mode(self)
+
+  def TakeTcpControl(self, timeout: float = 12.0, keep_enabled: bool = True) -> int:
+    """Recover from pause / error / collision-protect / pendant and switch to TCP.
+
+    RequestControl() is only legal when powered-off or disabled. If the
+    pendant currently owns ENABLE we disable only long enough to grab TCP,
+    then EnableRobot() again when keep_enabled is True so a SafeSkin HIT
+    does not leave the arm Disabled / Online.
+    """
+    return take_tcp_control(self, timeout=timeout, keep_enabled=keep_enabled)
+
+  def ResetSafety(self) -> int:
+    """Clear collision / approach-pause / alarms without DisableRobot."""
+    return reset_safety(self)
+
+  def EnsureEnabled(self, load: float = None) -> int:
+    """Enable the arm if a HIT / protect path dropped it to DISABLED."""
+    return ensure_enabled(self, load=load)
+
+  def ModeName(self, mode: int = None) -> str:
+    value = self.RobotModeValue() if mode is None else int(mode)
+    return mode_name(value)
+
   def StartFeedbackMonitor(self, callback: Callable = None):
     """
     Start the status-feedback monitor thread
@@ -362,6 +400,12 @@ class DobotRobot:
   stop_feedback_monitor = StopFeedbackMonitor
   get_error = GetError
   get_error_formatted = GetErrorFormatted
+  robot_mode_value = RobotModeValue
+  in_tcp_mode = InTcpMode
+  take_tcp_control = TakeTcpControl
+  reset_safety = ResetSafety
+  ensure_enabled = EnsureEnabled
+  mode_name = ModeName
   @property
   def is_connected(self):
     return self.IsConnected

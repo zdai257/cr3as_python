@@ -19,14 +19,10 @@ def main():
       print("1. Connected")
       print("=" * 50)
       
-      # Request TCP control mode
-      print("Request TCP control mode...")
-      response = robot.robot_control.RequestControl()
-      print(f"response: {response}")
-      
-      # Clear alarms if any
-      print("Clear alarms...")
-      robot.robot_control.ClearError()
+      # Recover pause/collision-protect and take exclusive TCP control
+      print("Take TCP control...")
+      mode = robot.take_tcp_control()
+      print(f"TCP mode={robot.mode_name(mode)}")
       
       # Enable robot (1 kg payload)
       print("Enable robot...")

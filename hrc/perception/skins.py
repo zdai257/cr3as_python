@@ -18,6 +18,7 @@ because Dobot does not document analog skin ADC in the public packet map.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Optional, Sequence, Tuple
 
@@ -177,36 +178,122 @@ class SafeSkinFrontend:
     self._conductance = np.zeros(n, dtype=float)
     self._latest: Optional[SkinReading] = None
     self.enabled = bool(_cfg_get(cfg, "enabled", True))
+    self.active = False
     self.analog_layout = str(_cfg_get(cfg, "analog_layout", "uint16_le"))
     self.analog_channels = int(_cfg_get(cfg, "channels", 4))
     self.analog_scale = float(_cfg_get(cfg, "analog_scale", 1.0))
     self.analog_offset = float(_cfg_get(cfg, "analog_offset", 0.0))
     self.sense_range_mm = float(_cfg_get(cfg, "sense_range_mm", SENSE_RANGE_MM))
     self.threshold = float(_cfg_get(cfg, "conductance_threshold", 0.0))
+    # firmware_safety=False: keep analog streaming but do not latch
+    # controller collision-protect (pendant / next TCP run stay usable).
+    self.firmware_safety = bool(_cfg_get(cfg, "firmware_safety", False))
+    self.auto_clear = bool(_cfg_get(cfg, "auto_clear", True))
+    self.part_ids = (
+      int(_cfg_get(cfg, "forearm_part", 3)),
+      int(_cfg_get(cfg, "j4_part", 4)),
+      int(_cfg_get(cfg, "j5_part", 5)),
+      int(_cfg_get(cfg, "j6_part", 6)),
+    )
+    self._last_clear_s = 0.0
 
-  def enable(self) -> None:
+  def _collision_level(self) -> Optional[int]:
+    raw = _cfg_get(self.cfg, "collision_level", None)
+    if self.firmware_safety:
+      return None if raw is None else int(raw)
+    return 0 if raw is None else int(raw)
+
+  def enable(self, firmware_safety: Optional[bool] = None) -> None:
     if not self.enabled:
       return
+    if firmware_safety is not None:
+      self.firmware_safety = bool(firmware_safety)
     rc = self.robot.robot_control
     rc.EnableSafeSkin(1)
     sensitivity = int(_cfg_get(self.cfg, "sensitivity", 2))
-    for part in (
-      _cfg_get(self.cfg, "forearm_part", 3),
-      _cfg_get(self.cfg, "j4_part", 4),
-      _cfg_get(self.cfg, "j5_part", 5),
-      _cfg_get(self.cfg, "j6_part", 6),
-    ):
+    for part in self.part_ids:
       rc.SetSafeSkin(int(part), sensitivity)
+    level = self._collision_level()
+    if level is not None:
+      rc.SetCollisionLevel(int(level))
+    if not self.firmware_safety:
+      # 0 = stop/disable (must never use for sensing). 2 = ignore if firmware
+      # allows it, else 1 = pause. HIT stays a sensor flag, not a Disable.
+      applied = False
+      for post in (2, 1):
+        try:
+          resp = rc.SetPostCollisionMode(post)
+          text = "" if resp is None else str(resp).strip()
+          if text.startswith("0"):
+            applied = True
+            break
+        except Exception:
+          continue
+      if not applied:
+        try:
+          rc.SetPostCollisionMode(1)
+        except Exception:
+          pass
+    self.active = True
 
   def disable(self) -> None:
     if not self.enabled:
       return
-    self.robot.robot_control.EnableSafeSkin(0)
+    try:
+      self.robot.robot_control.EnableSafeSkin(0)
+    finally:
+      self.active = False
 
-  def read(self, status: Optional[RobotStatus] = None) -> Optional[SkinReading]:
+  def reset(self) -> None:
+    """Drop latched collision-protect and re-arm sensing."""
+    reset = getattr(self.robot, "reset_safety", None) or getattr(
+      self.robot, "ResetSafety", None
+    )
+    if callable(reset):
+      reset()
+    else:
+      try:
+        self.robot.robot_control.ClearError()
+      except Exception:
+        pass
+    if self.enabled:
+      self.enable()
+
+  def _maybe_clear_protect(self, status: Optional[RobotStatus]) -> None:
+    if not self.auto_clear or self.firmware_safety or status is None:
+      return
+    mode = int(getattr(status, "robot_mode", 0) or 0)
+    collision = int(getattr(status, "collision_state", 0) or 0)
+    if collision == 0 and mode not in (9, 10):
+      return
+    now = time.time()
+    if now - self._last_clear_s < 0.4:
+      return
+    self._last_clear_s = now
+    reset = getattr(self.robot, "reset_safety", None) or getattr(
+      self.robot, "ResetSafety", None
+    )
+    if callable(reset):
+      reset()
+    else:
+      rc = self.robot.robot_control
+      try:
+        rc.Stop()
+      except Exception:
+        pass
+      try:
+        rc.ClearError()
+      except Exception:
+        pass
+
+  def read(
+    self, status: Optional[RobotStatus] = None, *, clear: bool = False
+  ) -> Optional[SkinReading]:
     """Pull the latest 30004 sample into a SkinReading."""
     if status is None:
       status = self.robot.GetStatus()
+    if clear:
+      self._maybe_clear_protect(status)
     reading = SkinReading.from_status(
       status,
       analog_layout=self.analog_layout,
@@ -254,3 +341,27 @@ class SafeSkinFrontend:
     if reading is not None:
       return reading.triggered(self.threshold)
     return bool(self.threshold > 0 and np.any(self._conductance >= self.threshold))
+
+  def as_dict(self, reading: Optional[SkinReading] = None) -> dict:
+    reading = reading if reading is not None else self._latest
+    status = self.robot.GetStatus() if hasattr(self.robot, "GetStatus") else None
+    collision = int(getattr(status, "collision_state", 0) or 0) if status else 0
+    payload = {
+      "enabled": self.enabled,
+      "active": self.active,
+      "firmware_safety": self.firmware_safety,
+      "auto_clear": self.auto_clear,
+      "parts": list(SKIN_PARTS),
+      "collision_state": collision,
+      "approach": None,
+      "proximity": None,
+      "conductance": None,
+      "triggered": False,
+    }
+    if reading is not None:
+      payload["approach"] = reading.approach.tolist()
+      payload["proximity"] = reading.proximity.tolist()
+      payload["conductance"] = reading.conductance.tolist()
+      payload["triggered"] = bool(reading.triggered(self.threshold))
+      payload["timestamp_ms"] = reading.timestamp_ms
+    return payload

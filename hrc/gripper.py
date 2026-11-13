@@ -9,6 +9,14 @@ from .models.pgea import PGEA5026Model
 from .utils.dashboard import parse_dashboard
 
 
+GRIP_STATE_NAMES = {
+  0: "moving",
+  1: "arrived",
+  2: "gripped",
+  3: "dropped",
+}
+
+
 class PGEAGripper:
   """PGE / PGE-A register map (0-1000 position, 20-100% force)."""
 
@@ -18,6 +26,8 @@ class PGEAGripper:
     self.model = PGEA5026Model(cfg)
     self.index: Optional[int] = None
     self.connected = False
+    self.last_command: Optional[int] = None
+    self.last_error: Optional[str] = None
 
   def connect(self) -> None:
     io = self.robot.io
@@ -40,6 +50,7 @@ class PGEAGripper:
     self._write(int(self.cfg.reg_force), int(self.cfg.force_percent))
     self._write(int(self.cfg.reg_speed), int(self.cfg.speed_percent))
     self.connected = True
+    self.last_error = None
 
   def disconnect(self) -> None:
     if self.index is None:
@@ -50,10 +61,12 @@ class PGEAGripper:
       self.index = None
       self.connected = False
 
-  def set_position(self, position_0_1000: int) -> None:
+  def set_position(self, position_0_1000: int, wait: bool = True) -> None:
     pos = int(max(0, min(1000, position_0_1000)))
     self._write(int(self.cfg.reg_position), pos)
-    time.sleep(float(self.cfg.settle_s))
+    self.last_command = pos
+    if wait:
+      time.sleep(float(self.cfg.settle_s))
 
   def open(self) -> None:
     self.set_position(int(self.cfg.open_position))
@@ -98,11 +111,34 @@ class PGEAGripper:
     _, values, _ = parse_dashboard(response)
     return int(values[0]) if values else None
 
+  def grip_state_name(self) -> str:
+    if not self.connected:
+      return "disconnected"
+    state = self.grip_state()
+    if state is None:
+      return "unknown"
+    return GRIP_STATE_NAMES.get(int(state), f"code_{int(state)}")
+
   def as_dict(self) -> dict:
+    pos = None
+    opening = None
+    state = None
+    if self.connected:
+      try:
+        pos = self.position()
+        opening = self.model.opening_mm(pos)
+        state = self.grip_state()
+      except Exception as exc:
+        self.last_error = str(exc)
     return {
       "connected": self.connected,
-      "position": self.position() if self.connected else None,
-      "opening_mm": self.opening_mm() if self.connected else None,
+      "enabled": bool(getattr(self.cfg, "enabled", True)),
+      "position": pos,
+      "command": self.last_command,
+      "opening_mm": opening,
+      "grip_state": state,
+      "grip_state_name": self.grip_state_name() if self.connected else "disconnected",
+      "last_error": self.last_error,
       "model": self.model.as_dict(),
     }
 

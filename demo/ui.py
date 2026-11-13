@@ -17,13 +17,15 @@ import time
 from tkinter import *
 from tkinter import ttk, messagebox
 from tkinter.scrolledtext import ScrolledText
-from dobot_sdk import DobotRobot, load_robot_config
+from dobot_sdk import load_robot_config
 from dobot_sdk import CoordinateType
 from dobot_sdk.api.error_controller import (
   get_error,
   format_error_messages_from_http,
   SUPPORTED_LANGUAGES
 )
+from hrc.perception.skins import SKIN_PARTS
+from hrc.robot import CS3ASRobot
 
 LABEL_JOINT = [["J1-", "J2-", "J3-", "J4-", "J5-", "J6-"],
         ["J1:", "J2:", "J3:", "J4:", "J5:", "J6:"],
@@ -53,8 +55,8 @@ class RobotUI(object):
 
   def __init__(self, robot_ip=None, di_count=24, do_count=24):
     self.root = Tk()
-    self.root.title("Dobot SDK Python Demo V4")
-    self.root.geometry("900x900")
+    self.root.title("CS3AS HRC — arm, SafeSkin, gripper")
+    self.root.geometry("920x1040")
     self.robot_ip = robot_ip or load_robot_config().ip
     self.di_count = di_count
     self.do_count = do_count
@@ -149,7 +151,13 @@ class RobotUI(object):
     self.label_cent.place(rely=row_y, x=535, anchor=CENTER)
 
     self.set_button(master=self.frame_dashboard,
-            text="Confirm", rely=row_y, x=620, anchor=CENTER, command=self.confirm_speed)
+            text="Confirm", rely=row_y, x=590, anchor=CENTER, command=self.confirm_speed)
+
+    self.set_button(master=self.frame_dashboard,
+            text="TCP", rely=row_y, x=680, anchor=CENTER, command=self.request_tcp)
+
+    self.set_button(master=self.frame_dashboard,
+            text="ResetSafety", rely=row_y, x=790, anchor=CENTER, command=self.reset_safety)
 
     # Move Function
     self.frame_move = LabelFrame(self.root, text="Move Function", labelanchor="nw",
@@ -243,6 +251,68 @@ class RobotUI(object):
       canvas.create_oval(2, 2, 16, 16, fill="gray", outline="black")
       canvas.create_text(9, 9, text=str(i+1), fill="white", font=("Arial", 8))
       self.do_indicators.append(canvas)
+
+    self.frame_hrc = LabelFrame(
+      self.root, text="HRC Cell — SafeSkin + Gripper",
+      labelanchor="nw", bg="#FFFFFF", width=870, height=175, border=2)
+
+    self.label_skin_collision = Label(self.frame_hrc, text="Collision: --", fg="#444444")
+    self.label_skin_collision.place(rely=0.12, x=15, anchor=W)
+    self.label_skin_mode = Label(self.frame_hrc, text="TCP: --", fg="#444444")
+    self.label_skin_mode.place(rely=0.12, x=200, anchor=W)
+
+    self.skin_bars = {}
+    for i, name in enumerate(SKIN_PARTS):
+      x0 = 15 + i * 175
+      Label(self.frame_hrc, text=name).place(rely=0.38, x=x0, anchor=W)
+      canvas = Canvas(self.frame_hrc, width=90, height=14, bg="#EEEEEE", highlightthickness=1)
+      canvas.place(rely=0.38, x=x0 + 62, anchor=W)
+      bar = canvas.create_rectangle(0, 0, 0, 14, fill="#4CAF50", outline="")
+      value = Label(self.frame_hrc, text="0.00", width=5)
+      value.place(rely=0.38, x=x0 + 158, anchor=W)
+      self.skin_bars[name] = {"canvas": canvas, "bar": bar, "label": value}
+
+    self.button_skin_on = self.set_button(
+      master=self.frame_hrc, text="Skin On", rely=0.68, x=70, anchor=CENTER,
+      command=self.skins_enable)
+    self.button_skin_off = self.set_button(
+      master=self.frame_hrc, text="Skin Off", rely=0.68, x=160, anchor=CENTER,
+      command=self.skins_disable)
+    self.button_skin_reset = self.set_button(
+      master=self.frame_hrc, text="Skin Reset", rely=0.68, x=260, anchor=CENTER,
+      command=self.skins_reset)
+
+    self.skin_safety_var = IntVar(self.root, value=0)
+    self.check_skin_safety = Checkbutton(
+      self.frame_hrc, text="Firmware safety stop", variable=self.skin_safety_var,
+      bg="#FFFFFF", command=self.skins_toggle_safety)
+    self.check_skin_safety.place(rely=0.68, x=430, anchor=CENTER)
+    self.button_list.append(self.check_skin_safety)
+
+    self.label_grip = Label(self.frame_hrc, text="Gripper: disconnected")
+    self.label_grip.place(rely=0.90, x=15, anchor=W)
+
+    self.button_grip_connect = self.set_button(
+      master=self.frame_hrc, text="Gripper", rely=0.90, x=280, anchor=CENTER,
+      command=self.gripper_connect)
+    self.button_grip_open = self.set_button(
+      master=self.frame_hrc, text="Open", rely=0.90, x=360, anchor=CENTER,
+      command=self.gripper_open)
+    self.button_grip_close = self.set_button(
+      master=self.frame_hrc, text="Close", rely=0.90, x=430, anchor=CENTER,
+      command=self.gripper_close)
+
+    self.grip_scale = Scale(
+      self.frame_hrc, from_=0, to=1000, orient=HORIZONTAL, length=220,
+      showvalue=True, command=None)
+    self.grip_scale.set(1000)
+    self.grip_scale.place(rely=0.88, x=470, anchor=W)
+    self.grip_scale.bind("<ButtonRelease-1>", self.gripper_set_pos)
+    self.button_list.append(self.grip_scale)
+
+    self._last_grip_poll = 0.0
+    self._tcp_owned = False
+    self._pending_safety_reset = False
 
     self.frame_feed_log = Frame(
       self.root, bg="#FFFFFF", width=870, pady=10, height=430, border=2)
@@ -340,6 +410,7 @@ class RobotUI(object):
     self.frame_dashboard.pack()
     self.frame_move.pack()
     self.frame_io.pack()
+    self.frame_hrc.pack()
     self.frame_feed_log.pack()
 
   def set_move(self, text, label_value, default_value, entry_value, rely, master):
@@ -405,6 +476,13 @@ class RobotUI(object):
       # Disconnect
       try:
         if self.robot:
+          try:
+            self.robot.shutdown(
+              disable=bool(self.global_state.get("enable")),
+              skins_off=True,
+            )
+          except Exception:
+            pass
           self.robot.Disconnect()
           self.robot = None
         self.add_log("Disconnected")
@@ -414,6 +492,12 @@ class RobotUI(object):
       for i in self.button_list:
         i["state"] = "disable"
       self.button_connect["text"] = "Connect"
+      self.global_state["enable"] = False
+      self.button_enable["text"] = "Enable"
+      self.label_grip["text"] = "Gripper: disconnected"
+      self.label_skin_collision["text"] = "Collision: --"
+      self.label_skin_mode["text"] = "TCP: --"
+      self._tcp_owned = False
     else:
       # Connect
       try:
@@ -427,23 +511,25 @@ class RobotUI(object):
         self.add_log(f"Connecting to robot: {ip}")
         self.add_log(f" Dashboard: {dash_port}, Feedback: {feedback_port}")
         
-        self.robot = DobotRobot(
-          ip, 
-          dashboard_port=dash_port, 
-          feedback_port=feedback_port
+        self.robot = CS3ASRobot.from_config(
+          ip=ip,
+          dashboard_port=dash_port,
+          feedback_port=feedback_port,
         )
         self.robot.Connect()
         
         # Set robot language
         self.robot.error.set_language(self.current_lang)
         
-        # Request TCP control mode
-        self.robot.robot_control.RequestControl()
-        
-        # Start feedback monitor
-        self.robot.StartFeedbackMonitor()
-        
-        self.add_log("Connected")
+        self.robot.prepare(enable=False, connect_gripper=False)
+        if self.robot.cfg.skins.enabled:
+          self.robot.skins.enable(firmware_safety=bool(self.skin_safety_var.get()))
+        self._tcp_owned = True
+        self.root.after(400, self._poll_gripper)
+        self.add_log(
+          f"Connected  TCP={self.robot.in_tcp_mode()}  "
+          f"mode={self.robot.mode_name()}  skins={self.robot.skins.active}"
+        )
       except Exception as e:
         messagebox.showerror("Attention!", f"Connection Error:{e}")
         self.add_log(f"Connection failed: {e}")
@@ -711,6 +797,8 @@ class RobotUI(object):
           else:
             # Also poll leftover errors outside ERROR mode
             self.display_error_info()
+
+          self._update_hrc_panel(status)
       except Exception as e:
         self.add_log(f"Feedback error: {e}")
       
@@ -762,3 +850,191 @@ class RobotUI(object):
     # Reset cache so the next fetch can refresh
     self.last_error_message = None
     self.last_error_ids = None
+
+  def request_tcp(self):
+    if not self.robot:
+      return
+    try:
+      mode = self.robot.take_tcp_control()
+      self._tcp_owned = True
+      self.add_log(f"TCP control: mode={self.robot.mode_name(mode)}")
+    except Exception as e:
+      self.add_log(f"TCP control failed: {e}")
+
+  def reset_safety(self):
+    if not self.robot:
+      return
+    try:
+      mode = self.robot.reset_safety()
+      self.add_log(f"Safety reset: mode={self.robot.mode_name(mode)}")
+    except Exception as e:
+      self.add_log(f"Safety reset failed: {e}")
+
+  def skins_enable(self):
+    if not self.robot:
+      return
+    try:
+      self.robot.skins.enable(firmware_safety=bool(self.skin_safety_var.get()))
+      self.add_log(
+        f"SafeSkin on (firmware_safety={bool(self.skin_safety_var.get())})"
+      )
+    except Exception as e:
+      self.add_log(f"SafeSkin enable failed: {e}")
+
+  def skins_disable(self):
+    if not self.robot:
+      return
+    try:
+      self.robot.skins.disable()
+      self.robot.reset_safety()
+      self.add_log("SafeSkin off")
+    except Exception as e:
+      self.add_log(f"SafeSkin disable failed: {e}")
+
+  def skins_reset(self):
+    if not self.robot:
+      return
+    try:
+      self.robot.skins.reset()
+      self.add_log("SafeSkin reset (collision-protect cleared)")
+    except Exception as e:
+      self.add_log(f"SafeSkin reset failed: {e}")
+
+  def skins_toggle_safety(self):
+    if not self.robot or not getattr(self.robot, "skins", None):
+      return
+    try:
+      self.robot.skins.firmware_safety = bool(self.skin_safety_var.get())
+      self.robot.skins.auto_clear = not self.robot.skins.firmware_safety
+      self.add_log(
+        f"SafeSkin firmware_safety={self.robot.skins.firmware_safety}"
+      )
+    except Exception as e:
+      self.add_log(f"SafeSkin safety toggle failed: {e}")
+
+  def gripper_connect(self):
+    if not self.robot:
+      return
+    grip = getattr(self.robot, "gripper", None)
+    if grip is None:
+      return
+    try:
+      if grip.connected:
+        grip.disconnect()
+        self.button_grip_connect["text"] = "Gripper"
+        self.label_grip["text"] = "Gripper: disconnected"
+        self.add_log("Gripper disconnected")
+      else:
+        grip.connect()
+        self.button_grip_connect["text"] = "GripOff"
+        self.add_log("Gripper connected")
+    except Exception as e:
+      self.add_log(f"Gripper connect failed: {e}")
+
+  def gripper_open(self):
+    if not self.robot or not getattr(self.robot.gripper, "connected", False):
+      self.add_log("Gripper not connected")
+      return
+    try:
+      self.robot.gripper.open()
+      self.grip_scale.set(int(self.robot.cfg.gripper.open_position))
+      self.add_log("Gripper open")
+    except Exception as e:
+      self.add_log(f"Gripper open failed: {e}")
+
+  def gripper_close(self):
+    if not self.robot or not getattr(self.robot.gripper, "connected", False):
+      self.add_log("Gripper not connected")
+      return
+    try:
+      self.robot.gripper.close()
+      self.grip_scale.set(int(self.robot.cfg.gripper.close_position))
+      self.add_log("Gripper close")
+    except Exception as e:
+      self.add_log(f"Gripper close failed: {e}")
+
+  def gripper_set_pos(self, event=None):
+    if not self.robot or not getattr(self.robot.gripper, "connected", False):
+      return
+    try:
+      pos = int(self.grip_scale.get())
+      self.robot.gripper.set_position(pos, wait=False)
+      self.add_log(f"Gripper position {pos}")
+    except Exception as e:
+      self.add_log(f"Gripper position failed: {e}")
+
+  def _update_hrc_panel(self, status):
+    if not self.robot:
+      return
+    collision = int(getattr(status, "collision_state", 0) or 0)
+    paused = self.current_robot_mode in (9, 10)
+    self.label_skin_collision["text"] = (
+      f"Collision: {'YES' if collision else 'no'}"
+    )
+    self.label_skin_collision["fg"] = "#C62828" if collision else "#2E7D32"
+    self.label_skin_mode["text"] = (
+      f"TCP: {'yes' if self._tcp_owned else 'NO'}  "
+      f"{LABEL_ROBOT_MODE.get(self.current_robot_mode, '')}"
+    )
+
+    reading = None
+    try:
+      reading = self.robot.skins.read(status, clear=False)
+    except Exception:
+      reading = None
+    if reading is not None:
+      for i, name in enumerate(SKIN_PARTS):
+        widgets = self.skin_bars.get(name)
+        if not widgets:
+          continue
+        prox = float(reading.proximity[i]) if i < reading.proximity.size else 0.0
+        approach = float(reading.approach[i]) if i < reading.approach.size else 0.0
+        width = max(1, int(90 * min(1.0, max(0.0, prox))))
+        color = "#C62828" if abs(approach) > 0 or prox >= 0.85 else "#FB8C00" if prox >= 0.35 else "#43A047"
+        widgets["canvas"].coords(widgets["bar"], 0, 0, width, 14)
+        widgets["canvas"].itemconfig(widgets["bar"], fill=color)
+        widgets["label"]["text"] = f"{prox:.2f}"
+
+    skins = getattr(self.robot, "skins", None)
+    if (
+      skins is not None
+      and skins.auto_clear
+      and not skins.firmware_safety
+      and (collision or paused)
+      and not self._pending_safety_reset
+    ):
+      self._pending_safety_reset = True
+      self.root.after(0, self._auto_reset_safety)
+
+  def _poll_gripper(self):
+    if not self.global_state.get("connect") or not self.robot:
+      return
+    grip = getattr(self.robot, "gripper", None)
+    if grip is None:
+      return
+    if not grip.connected:
+      self.label_grip["text"] = "Gripper: disconnected"
+      self.button_grip_connect["text"] = "Gripper"
+      self.root.after(500, self._poll_gripper)
+      return
+    try:
+      info = grip.as_dict()
+      pos = info.get("position")
+      opening = info.get("opening_mm")
+      state = info.get("grip_state_name")
+      pos_txt = "--" if pos is None else f"{int(pos)}"
+      open_txt = "--" if opening is None else f"{opening:.1f}mm"
+      self.label_grip["text"] = f"Gripper: {pos_txt} / {open_txt}  {state}"
+      self.button_grip_connect["text"] = "GripOff"
+    except Exception:
+      self.label_grip["text"] = "Gripper: error"
+    self.root.after(500, self._poll_gripper)
+
+  def _auto_reset_safety(self):
+    self._pending_safety_reset = False
+    if not self.robot:
+      return
+    try:
+      self.robot.recover_if_protected()
+    except Exception as e:
+      self.add_log(f"Auto safety reset failed: {e}")

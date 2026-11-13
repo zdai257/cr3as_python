@@ -8,9 +8,10 @@ from typing import Optional, Sequence
 import numpy as np
 
 from dobot_sdk import CoordinateType, DobotRobot, load_robot_config
+from dobot_sdk.api.tcp_control import mode_name
 
 from .gripper import PGEAGripper
-from .perception.skins import SafeSkinFrontend
+from .perception.skins import SKIN_PARTS, SafeSkinFrontend
 from .planning.base import Trajectory
 from .utils.dashboard import as_vector, parse_dashboard
 from .utils.kinematics import Kinematics
@@ -39,22 +40,36 @@ class CS3ASRobot(DobotRobot):
     self.kin = Kinematics(
       self.cfg.kinematics, robot=self, gripper_model=self.gripper.model
     )
+    self._session_enabled = False
 
   def prepare(self, enable: bool = True, connect_gripper: bool = True) -> None:
-    self.robot_control.RequestControl()
-    self.robot_control.ClearError()
+    """Take exclusive TCP control, clear latched safety, then arm the cell.
+
+    SafeSkin Set*/Enable* commands are queued and only flush while the arm
+    is enabled, so sensing sessions must EnableRobot (idle, no motion).
+    """
+    self._session_enabled = bool(enable)
     self.StartFeedbackMonitor()
-    if self.cfg.skins.enabled:
-      self.skins.enable()
+    time.sleep(0.2)
+    self.take_tcp_control(keep_enabled=enable)
+    self.reset_safety()
     if enable:
-      self.robot_control.EnableRobot(load=float(self.cfg.robot.payload_kg))
+      self.ensure_enabled(load=float(self.cfg.robot.payload_kg))
       self.robot_control.SpeedFactor(int(self.cfg.robot.speed_factor))
       self.wait_idle()
     self.apply_tool_frame()
+    if self.cfg.skins.enabled:
+      self.skins.enable()
     if connect_gripper and self.cfg.gripper.enabled:
       self.gripper.connect()
 
-  def shutdown(self) -> None:
+  def shutdown(self, disable: bool = False, skins_off: bool = True) -> None:
+    """Drop the TCP sockets. Default: do not DisableRobot.
+
+    DisableRobot / Online takeover after a SafeSkin HIT is what kills the
+    next stream. We ClearError, optionally turn SafeSkin off *while still
+    in TCP* so the pendant does not inherit a latched HIT, then disconnect.
+    """
     try:
       if self.gripper.connected:
         self.gripper.open()
@@ -62,13 +77,81 @@ class CS3ASRobot(DobotRobot):
     except Exception:
       pass
     try:
-      self.robot_control.DisableRobot()
+      self.reset_safety()
     except Exception:
       pass
+    if skins_off:
+      try:
+        if self.cfg.skins.enabled:
+          self.skins.disable()
+      except Exception:
+        pass
+      try:
+        self.robot_control.ClearError()
+      except Exception:
+        pass
+    if disable:
+      try:
+        self.robot_control.DisableRobot()
+      except Exception:
+        pass
+      try:
+        self.robot_control.ClearError()
+      except Exception:
+        pass
     try:
       self.StopFeedbackMonitor()
     except Exception:
       pass
+
+  def recover_if_protected(self) -> int:
+    """If a SafeSkin HIT latched pause/error/disable, stay in TCP and re-enable."""
+    status = self.GetStatus()
+    if status is not None:
+      mode = int(status.robot_mode)
+      collision = int(getattr(status, "collision_state", 0) or 0)
+    else:
+      mode = self.robot_mode_value()
+      collision = 0
+    hit = False
+    try:
+      reading = self.skins.read(status, clear=False)
+      hit = bool(reading is not None and reading.triggered())
+    except Exception:
+      hit = False
+    latched = collision or mode in (9, 10) or (mode == 4 and hit)
+    if not latched:
+      return mode
+    mode = self.reset_safety()
+    if self.skins.firmware_safety:
+      return mode
+    mode = self.ensure_enabled(load=float(self.cfg.robot.payload_kg))
+    if self.cfg.skins.enabled:
+      self.skins.enable()
+    return mode
+
+  def cell_status(self) -> dict:
+    """Arm + SafeSkin + gripper snapshot for UI / examples."""
+    status = self.GetStatus()
+    mode = self.robot_mode_value()
+    reading = self.skins.latest() if self.skins.enabled else None
+    gripper = {}
+    try:
+      gripper = self.gripper.as_dict()
+    except Exception as exc:
+      gripper = {"connected": self.gripper.connected, "last_error": str(exc)}
+    return {
+      "ip": self.ip,
+      "tcp": self.in_tcp_mode(),
+      "mode": mode,
+      "mode_name": mode_name(mode),
+      "enabled": bool(status.enable_status) if status else False,
+      "collision_state": int(getattr(status, "collision_state", 0) or 0) if status else 0,
+      "safety": status.get_safety_state_desc() if status else "unknown",
+      "skins": self.skins.as_dict(reading),
+      "gripper": gripper,
+      "skin_parts": list(SKIN_PARTS),
+    }
 
   def apply_tool_frame(self) -> None:
     """Load the PGEA-50-26 TCP (x=0, y=0, z=118 mm) onto the controller."""
@@ -137,6 +220,7 @@ class CS3ASRobot(DobotRobot):
 
   def wait_idle(self, timeout: float = 30.0, poll: float = 0.05) -> bool:
     deadline = time.time() + timeout
+    recovers = 0
     while time.time() < deadline:
       response = self.robot_control.RobotMode()
       try:
@@ -144,10 +228,15 @@ class CS3ASRobot(DobotRobot):
         mode = int(values[0]) if values else -1
       except (ValueError, IndexError):
         error_id, mode = -1, -1
-      if error_id == 0 and mode in (4, 5):
-        # 4 = disabled idle, 5 = enabled idle
-        if mode == 5 or not self._enabled():
-          return True
+      if error_id == 0 and mode == 5:
+        return True
+      if error_id == 0 and mode == 4 and not self._session_enabled:
+        return True
+      if mode in (9, 10) and not self.skins.firmware_safety and recovers < 3:
+        recovers += 1
+        self.recover_if_protected()
+        time.sleep(poll)
+        continue
       if mode == 9:
         raise RuntimeError(f"robot alarm while waiting: {response}")
       time.sleep(poll)

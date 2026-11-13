@@ -83,8 +83,8 @@ def main() -> int:
       robot.prepare(enable=True, connect_gripper=True)
     else:
       # TCP connect only; no enable / no gripper init.
-      robot.robot_control.RequestControl()
-      print(f"connected {robot.ip} mode={robot.robot_control.RobotMode()}")
+      robot.prepare(enable=False, connect_gripper=False)
+      print(f"connected {robot.ip} mode={robot.mode_name()} tcp={robot.in_tcp_mode()}")
 
     planner = make_planner(args.planner, cfg=robot.cfg, kinematics=robot.kin)
     pipeline = PickPlacePipeline(robot, planner=planner)

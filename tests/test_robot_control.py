@@ -17,6 +17,8 @@ def test_robot_control_methods():
   # test RequestControl
   assert hasattr(robot.robot_control, 'RequestControl')
   assert hasattr(robot.robot_control, 'EnableRobot')
+  assert hasattr(robot, 'TakeTcpControl')
+  assert hasattr(robot, 'ResetSafety')
   print("RequestControl exists")
   
   # test enable methods

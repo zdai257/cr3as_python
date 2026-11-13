@@ -8,6 +8,9 @@ from dobot_sdk import DobotRobot
 from dobot_sdk import CoordinateType
 import time
 
+HOME = [0, 0, 0, 0, 0, 0]
+SAFE_POSE = [-115.77, -6.38, 76.08, 21.82, -91.69, 100.43]
+
 def main():
   try:
     with DobotRobot.from_config() as robot:
@@ -19,7 +22,9 @@ def main():
       robot.robot_control.RequestControl()
       robot.robot_control.ClearError()
       robot.robot_control.EnableRobot(load=1.0)
+
       robot.robot_control.SpeedFactor(10)
+      robot.robot_control.AccJ(10)
       
       # Start status monitor
       robot.StartFeedbackMonitor()
@@ -27,17 +32,17 @@ def main():
       
       # ========== Joint move (MovJ) ==========
       print("\n--- Joint move (MovJ) ---")
-      print("Move to a safe joint pose...")
-      safe_pose = [0, -30, -60, 0, 90, 0]
-      robot.motion.MovJ(safe_pose, CoordinateType.JOINT)
-      time.sleep(3)
+      print("Move to a HOME pose...")
+      home = HOME
+      robot.motion.MovJ(home, CoordinateType.JOINT)
+      time.sleep(8)
 
       # ========== Joint move (MovJ) ==========
       print("\n--- Joint move (MovJ) ---")
-      print("Move to Home...")
-      safe_pose = [0, 0, 0, 0, 0, 0]
+      print("Move to SAFE_POSE...")
+      safe_pose = SAFE_POSE
       robot.motion.MovJ(safe_pose, CoordinateType.JOINT)
-      time.sleep(3)
+      time.sleep(8)
       
       # ========== Read current status ==========
       print("\n--- Read current status ---")
@@ -48,11 +53,6 @@ def main():
         print(f" X: {status.tool_vector_actual.x:.2f}")
         print(f" Y: {status.tool_vector_actual.y:.2f}")
         print(f" Z: {status.tool_vector_actual.z:.2f}")
-      
-      # Return to a safe pose
-      print("\nReturn to a safe pose...")
-      robot.motion.MovJ(safe_pose, CoordinateType.JOINT)
-      time.sleep(3)
       
       # Stop monitor
       robot.StopFeedbackMonitor()
