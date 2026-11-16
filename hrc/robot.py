@@ -12,9 +12,8 @@ from dobot_sdk.api.tcp_control import mode_name
 
 from .data.recorder import EpisodeRecorder
 from .gripper import PGEAGripper
-from .perception.camera import HandEyeCamera
+from .perception.camera import HandEyePerception, make_camera
 from .perception.oracle import OraclePerception
-from .perception.camera import HandEyePerception
 from .perception.skins import SKIN_PARTS, SafeSkinFrontend
 from .planning.base import Trajectory
 from .utils.dashboard import as_vector, parse_dashboard
@@ -41,7 +40,7 @@ class CS3ASRobot(DobotRobot):
     )
     self.gripper = PGEAGripper(self, self.cfg.gripper)
     self.skins = SafeSkinFrontend(self, self.cfg.skins)
-    self.camera = HandEyeCamera(self.cfg)
+    self.camera = make_camera(self.cfg)
     oracle = OraclePerception(self.cfg, skins=self.skins)
     self.perception = HandEyePerception(
       self.cfg, camera=self.camera, skins=self.skins, fallback=oracle
@@ -222,7 +221,7 @@ class CS3ASRobot(DobotRobot):
     }
 
   def query(self, extra: Optional[dict] = None):
-    """One perception snapshot: joints, pose, SafeSkin, gripper, hand-eye RGB."""
+    """One perception snapshot: joints, pose, SafeSkin, gripper, camera RGB(+depth)."""
     extra = dict(extra or {})
     if self.gripper.connected and extra.get("gripper_position") is None:
       try:
@@ -230,6 +229,32 @@ class CS3ASRobot(DobotRobot):
       except Exception:
         pass
     return self.observation(extra)
+
+  def propose_grasps(self, depth=None, cloud=None, **kwargs):
+    """GraspNet (or geometric fallback) from the current camera snapshot.
+
+    Live RealSense / Kinect depth is used when present; a synthetic table is
+    only built if both depth and cloud are missing.
+    """
+    from .perception.graspnet import GraspNetEngine
+
+    tcp = None
+    joints = None
+    try:
+      tcp = self.current_pose()
+      joints = self.current_joints()
+    except Exception:
+      pass
+    engine = GraspNetEngine(self.cfg)
+    return engine.propose_from_camera(
+      self.camera,
+      depth=depth,
+      cloud=cloud,
+      tcp_pose_mm=tcp,
+      joints=joints,
+      kin=self.kin,
+      **kwargs,
+    )
 
   def stream_skins(self, seconds: Optional[float] = None, recover: bool = True):
     """Yield SafeSkin readings at the 30004 rate (~125 Hz / 8 ms)."""

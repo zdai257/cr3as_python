@@ -41,7 +41,7 @@ def parse_args():
   )
   parser.add_argument("--ros2", default=None, help="write a rosbag2 directory")
   parser.add_argument("--enable", action="store_true", help="enable the arm (still no commanded motion)")
-  parser.add_argument("--camera", action="store_true", help="record ELP hand-eye JPEG (~30 FPS); Hub mp4 is H.264")
+  parser.add_argument("--camera", action="store_true", help="record configured camera JPEG (~30 FPS); Hub mp4 is H.264")
   parser.add_argument("--ip", default=None)
   return parser.parse_args()
 

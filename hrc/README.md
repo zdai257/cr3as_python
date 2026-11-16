@@ -1,13 +1,14 @@
 # HRC package (`hrc/`)
 
-CS3AS cell: Dobot arm + DH PGEA-50-26 + SafeSkin + ELP hand-eye camera. Numbers live in [`config/robot.yaml`](../config/robot.yaml).
+CS3AS cell: Dobot arm + DH PGEA-50-26 + SafeSkin + a selectable wrist camera (UVC / RealSense / Kinect). Numbers live in [`config/robot.yaml`](../config/robot.yaml).
 
 | Module | Role |
 |--------|------|
 | `robot.py` | `CS3ASRobot` — TCP takeover, Enable, skins, gripper attach, camera, `query()` |
 | `gripper.py` | Tool RS485 Modbus (DHGrip map). **Init fingers on the pendant plugin first** |
 | `perception/skins.py` | 125 Hz HIT + analog from Feedback 30004 |
-| `perception/camera.py` | ELP `/dev/video0` (not `/dev/video1`) |
+| `perception/cameras/` | `make_camera(cfg)` — UVC (any webcam; ELP is one example), RealSense D435i, Azure Kinect DK |
+| `perception/graspnet/` | GraspNet-1Billion grasp proposals (inference only) |
 | `data/` | Record 8 ms frames → npz, LeRobot parquet, HTML replay |
 | `planning/` | cartesian / joint / rrt / rrt_star / apf / learning stub |
 | `pipeline.py` | Pick-and-place stages |
@@ -25,6 +26,8 @@ python hrc/examples/collect_episode.py --seconds 8 --enable --camera --lerobot d
 python hrc/examples/view_episodes.py data/lerobot/skins --open
 python hrc/examples/view_episodes.py data/lerobot/skins --camera --serve
 python hrc/examples/visualize_episode.py data/lerobot/skins --gui --camera
+python hrc/examples/grasp_snapshot.py
+python hrc/examples/grasp_snapshot.py --camera --checkpoint weights/graspnet/checkpoint-rs.tar
 ```
 
 `CS3ASRobot.stream_skins()` / `record_skins()` / `query()` are the library entry points. `prepare(enable=True)` so queued `EnableSafeSkin` actually flushes.
@@ -55,5 +58,6 @@ TCP Open/Close only after pendant **DHGrip_v2-1-6Stable Init**. Do not tool-powe
 ## Perception
 
 - SafeSkin I8 flags are 0/1 HIT. Fine-grained values are analog ADC in the reserved 30004 bytes (`analog_max` 1023 → proximity / `distance_mm`).
-- Hand-eye: `robot.query().rgb` or `robot.camera.latest()`.
-- Oracle obstacles in YAML until RGB-D / LiDAR are enabled.
+- Camera: set `perception.camera` to `uvc`, `realsense`, or `k4a`. `robot.query().rgb` / `.depth` or `robot.camera.latest()`. ELP 06MT-KL170IR is one UVC example (`/dev/video0`, not the metadata node).
+- GraspNet: `python hrc/examples/grasp_snapshot.py` (weights + install notes in [`perception/graspnet/README.md`](perception/graspnet/README.md)). RealSense / Kinect feed live aligned depth; UVC still needs `--depth` / `--cloud` or a synthetic table. PGEA jaw gap 1.2–27.2 mm filters proposals.
+- Oracle obstacles in YAML until a depth camera (or LiDAR) is selected.

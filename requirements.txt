@@ -2,3 +2,6 @@ numpy>=1.19.0
 requests>=2.25.0
 opencv-python-headless>=4.8.0
 pyarrow>=14.0.0
+# Optional RGB-D cameras (not required to install this package):
+#   pip install pyrealsense2   # Intel RealSense D435i
+#   pip install pyk4a          # Azure Kinect DK (also needs the Azure Kinect SDK)

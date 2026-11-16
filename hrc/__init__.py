@@ -4,12 +4,17 @@ from .data import Episode, EpisodeRecorder, write_lerobot_dataset, write_ros2_ba
 from .gripper import PGEAGripper
 from .models import PGEA5026Model
 from .perception import (
+  GraspNetEngine,
+  GraspProposal,
   HandEyeCamera,
   HandEyePerception,
+  KinectCamera,
   OraclePerception,
   PerceptionFrontend,
+  RealSenseCamera,
   SafeSkinFrontend,
   SkinReading,
+  make_camera,
 )
 from .pipeline import PickPlacePipeline
 from .planning import PLANNER_REGISTRY, PathPlanner, Trajectory, make_planner
@@ -26,9 +31,14 @@ __all__ = [
   "Trajectory",
   "make_planner",
   "PLANNER_REGISTRY",
+  "GraspNetEngine",
+  "GraspProposal",
   "HandEyeCamera",
   "HandEyePerception",
+  "KinectCamera",
   "OraclePerception",
+  "RealSenseCamera",
+  "make_camera",
   "PerceptionFrontend",
   "SafeSkinFrontend",
   "SkinReading",

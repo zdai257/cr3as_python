@@ -3,3 +3,7 @@ __pycache__/
 .pyc
 .DS_Store
 **/.cache/
+weights/**/*.tar
+weights/**/*.pth
+weights/**/*.ckpt
+third_party/graspnet-baseline/

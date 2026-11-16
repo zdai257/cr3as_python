@@ -55,7 +55,7 @@ def main() -> int:
     default=None,
     help="export Hub-ready LeRobot v2.1 (30 FPS H.264; not 125 Hz parquet)",
   )
-  parser.add_argument("--camera", action="store_true", help="also open /dev/video0 (~30 FPS JPEG)")
+  parser.add_argument("--camera", action="store_true", help="also open the configured camera (~30 FPS JPEG)")
   parser.add_argument(
     "--firmware-safety",
     action="store_true",

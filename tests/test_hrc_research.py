@@ -34,7 +34,7 @@ from hrc.data import (
 )
 from hrc.gripper import REGISTER_MAPS, PGEAGripper
 from hrc.models import PGEA5026Model
-from hrc.perception.camera import HandEyeCamera
+from hrc.perception.camera import HandEyeCamera, make_camera
 from hrc.perception.skins import SafeSkinFrontend, SkinReading
 from hrc.utils.kinematics import Kinematics
 from dobot_sdk import load_robot_config
@@ -431,6 +431,59 @@ def test_recorder_hub_export_defaults():
   print("recorder / Hub export defaults OK")
 
 
+def test_graspnet_offline():
+  from dobot_sdk import load_robot_config
+  from hrc.perception.graspnet import GraspNetEngine, GraspProposal, filter_for_pgea
+  from hrc.perception.graspnet.mount import T_flange_cam, cad_path, nominal_t_flange_cam_mm
+
+  assert cad_path().is_file(), cad_path()
+  t = nominal_t_flange_cam_mm()
+  assert abs(t[0] - 91.66) < 1.0
+  assert abs(t[1]) < 1e-6
+  assert 50.0 < t[2] < 65.0
+  cfg = load_robot_config()
+  T = T_flange_cam(cfg)
+  assert T.shape == (4, 4)
+  assert abs(np.linalg.det(T[:3, :3]) - 1.0) < 1e-6
+  optical = T[:3, 2]
+  assert optical[2] > 0.9  # looks along flange +Z, 5° inward
+  wide = GraspProposal(
+    score=0.9,
+    width_m=0.08,
+    height_m=0.02,
+    depth_m=0.02,
+    rotation_cam=np.eye(3),
+    center_cam_m=np.array([0.0, 0.0, 0.4]),
+  )
+  assert not wide.fits_pgea()
+  assert filter_for_pgea([wide]) == []
+  engine = GraspNetEngine(cfg)
+  result = engine.propose(allow_geometric=True)
+  assert result.backend == "geometric"
+  assert result.grasps
+  assert all(g.fits_pgea() for g in result.grasps)
+  flange_pose = result.grasps[0].pose_in(result.T_flange_cam_mm)
+  assert flange_pose.shape == (6,)
+  assert np.isfinite(flange_pose).all()
+  row = np.zeros(17, dtype=float)
+  row[0] = 0.7
+  row[1] = 0.02
+  row[4:13] = np.eye(3).reshape(9)
+  row[13:16] = [0.01, 0.0, 0.3]
+  parsed = GraspProposal.from_graspnet_row(row)
+  assert abs(parsed.width_mm - 20.0) < 1e-6
+  print("GraspNet engine (geometric) OK", len(result.grasps), "t_cam", t.round(2).tolist())
+
+
+def _cfg_with_camera(driver):
+  import copy
+  from dobot_sdk.config import Cfg
+
+  data = copy.deepcopy(load_robot_config().to_dict())
+  data["perception"]["camera"] = driver
+  return Cfg(data)
+
+
 def test_handeye_camera_offline():
   cfg = load_robot_config()
   cam = HandEyeCamera(cfg)
@@ -445,6 +498,113 @@ def test_handeye_camera_offline():
   print("hand-eye camera config OK", payload["device"], payload["requested"])
 
 
+def test_make_camera_uvc_default():
+  from hrc.perception.camera import UvcCamera
+
+  cfg = load_robot_config()
+  cam = make_camera(cfg)
+  assert isinstance(cam, UvcCamera)
+  assert isinstance(cam, HandEyeCamera)
+  assert cam.device == "/dev/video0"
+  assert cam.as_dict()["driver"] == "uvc"
+  assert cam.has_depth is False
+  print("make_camera default UVC OK", cam.device)
+
+
+def test_make_camera_realsense_offline():
+  import importlib.util
+
+  from hrc.perception.camera import RealSenseCamera
+
+  cfg = _cfg_with_camera("realsense")
+  cam = make_camera(cfg)
+  assert isinstance(cam, RealSenseCamera)
+  assert cam.as_dict()["driver"] == "realsense"
+  assert cam.has_depth is True
+  if importlib.util.find_spec("pyrealsense2") is None:
+    try:
+      cam.open()
+      raise AssertionError("open() should fail without pyrealsense2")
+    except RuntimeError as exc:
+      assert "pyrealsense2" in str(exc)
+  print("make_camera realsense OK", cam.as_dict()["driver"])
+
+
+def test_make_camera_k4a_offline():
+  import importlib.util
+
+  from hrc.perception.camera import KinectCamera
+
+  cfg = _cfg_with_camera("k4a")
+  cam = make_camera(cfg)
+  assert isinstance(cam, KinectCamera)
+  assert cam.as_dict()["driver"] == "k4a"
+  assert cam.has_depth is True
+  if importlib.util.find_spec("pyk4a") is None:
+    try:
+      cam.open()
+      raise AssertionError("open() should fail without pyk4a")
+    except RuntimeError as exc:
+      assert "pyk4a" in str(exc)
+  print("make_camera k4a OK", cam.as_dict()["driver"])
+
+
+def test_intrinsics_follow_active_camera():
+  from hrc.perception.graspnet.geometry import CameraIntrinsics
+
+  uvc = CameraIntrinsics.from_cfg(load_robot_config())
+  assert uvc.width == 1920
+  rs = CameraIntrinsics.from_cfg(_cfg_with_camera("realsense"))
+  assert rs.width == 640
+  assert rs.height == 480
+  assert abs(rs.fx - 615.0) < 1.0
+  assert rs.width != 1920
+  print("CameraIntrinsics.from_cfg active camera OK", rs.width, rs.fx)
+
+
+def test_propose_live_depth_no_synthetic():
+  from hrc.perception.camera import CameraFrame
+  from hrc.perception.graspnet import GraspNetEngine
+
+  cfg = load_robot_config()
+  engine = GraspNetEngine(cfg)
+  rgb = np.zeros((48, 64, 3), dtype=np.uint8)
+  depth = np.full((48, 64), 0.42, dtype=np.float32)
+  depth[20:30, 16:48] = 0.36
+  frame = CameraFrame(
+    timestamp=0.0,
+    rgb=rgb,
+    device="test",
+    width=64,
+    height=48,
+    depth=depth,
+    driver="realsense",
+    fx=615.0,
+    fy=615.0,
+    cx=32.0,
+    cy=24.0,
+    has_depth=True,
+  )
+  result = engine.propose(rgb=frame, allow_geometric=True)
+  assert result.depth is not None
+  assert result.depth.shape == depth.shape
+  assert np.allclose(result.depth, depth)
+  assert result.backend == "geometric"
+  print("propose live depth (no synthetic table) OK", result.depth.shape)
+
+
+def test_unknown_camera_driver():
+  try:
+    make_camera(load_robot_config(), name="nope")
+    raise AssertionError("expected ValueError")
+  except ValueError as exc:
+    msg = str(exc)
+    assert "uvc" in msg
+    assert "realsense" in msg
+    assert "k4a" in msg
+  print("unknown camera driver OK")
+
+
 if __name__ == "__main__":
   test_pgea_model()
   test_tool_offset_fk()
@@ -453,6 +613,13 @@ if __name__ == "__main__":
   test_tcp_control_recovery()
   test_skins_and_gripper_status()
   test_handeye_camera_offline()
+  test_make_camera_uvc_default()
+  test_make_camera_realsense_offline()
+  test_make_camera_k4a_offline()
+  test_intrinsics_follow_active_camera()
+  test_propose_live_depth_no_synthetic()
+  test_unknown_camera_driver()
+  test_graspnet_offline()
   test_resample_episode_to_camera_fps()
   test_recorder_hub_export_defaults()
   test_camera_replay_html()
