@@ -50,7 +50,8 @@ def _g(section, name, default):
 def _resolve_checkpoint(cfg, checkpoint: Optional[Union[str, Path]] = None) -> Path:
   default_ckpt = repo_root() / "weights" / "graspnet" / "checkpoint-rs.tar"
   if checkpoint is not None:
-    return Path(str(checkpoint)) if checkpoint else default_ckpt
+    picked = Path(str(checkpoint)).expanduser()
+    return picked if picked.is_absolute() else repo_root() / picked
   gn = _section(cfg, "perception", "graspnet")
   driver = "uvc"
   try:
@@ -62,9 +63,11 @@ def _resolve_checkpoint(cfg, checkpoint: Optional[Union[str, Path]] = None) -> P
   by = _g(gn, "checkpoint_by_driver", None)
   picked = _g(by, driver, None) if by is not None else None
   if picked:
-    return Path(str(picked))
+    picked_path = Path(str(picked)).expanduser()
+    return picked_path if picked_path.is_absolute() else repo_root() / picked_path
   raw = _g(gn, "checkpoint", str(default_ckpt))
-  return Path(str(raw)) if raw else default_ckpt
+  picked_path = Path(str(raw)).expanduser()
+  return picked_path if picked_path.is_absolute() else repo_root() / picked_path
 
 
 def _unpack_frame(rgb, depth):
@@ -134,19 +137,45 @@ class GraspNetEngine:
     return self.checkpoint.is_file() and self._try_import() is not None
 
   def _try_import(self):
-    root = repo_root() / "third_party" / "graspnet-baseline"
+    gn = _section(self.cfg, "perception", "graspnet")
+    configured_root = _g(gn, "package_root", "third_party/graspnet-baseline")
+    package_root = Path(str(configured_root)).expanduser()
+    root = package_root if package_root.is_absolute() else repo_root() / package_root
+
     if root.is_dir():
-      for extra in (root, root / "models", root / "utils", root / "dataset"):
+      extras = [
+        root,
+        root / "models",
+        root / "utils",
+        root / "dataset",
+        root / "pointnet2",
+        root / "knn",
+      ]
+      for build_dir in (*root.glob("*/build/lib*"), *root.glob("*/build")):
+        extras.append(build_dir)
+      for extra in extras:
         s = str(extra)
-        if s not in sys.path:
+        if extra.is_dir() and s not in sys.path:
           sys.path.insert(0, s)
+    else:
+      self._net_error = f"graspnet-baseline package_root not found: {root}"
+      return None
+
     try:
       from graspnet import GraspNet, pred_decode  # type: ignore
 
       return GraspNet, pred_decode
-    except Exception as exc:
-      self._net_error = str(exc)
-      return None
+    except Exception as graspnet_error:
+      try:
+        from models.graspnet import GraspNet, pred_decode  # type: ignore
+
+        return GraspNet, pred_decode
+      except Exception as models_error:
+        self._net_error = (
+          f"cannot import graspnet-baseline from {root}: "
+          f"graspnet={graspnet_error}; models.graspnet={models_error}"
+        )
+        return None
 
   def load(self) -> bool:
     mods = self._try_import()
