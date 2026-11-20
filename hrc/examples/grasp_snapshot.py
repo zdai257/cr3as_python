@@ -28,8 +28,9 @@ import numpy as np  # noqa: E402
 
 from dobot_sdk import load_robot_config  # noqa: E402
 from dobot_sdk.config import Cfg  # noqa: E402
-from hrc.perception.graspnet import GraspNetEngine  # noqa: E402
+from hrc.perception.graspnet import GraspNetEngine, save_grasp_overlay  # noqa: E402
 from hrc.perception.graspnet.engine import rgbd_from_camera  # noqa: E402
+from datetime import datetime
 
 
 def parse_args():
@@ -41,7 +42,7 @@ def parse_args():
   parser.add_argument("--driver", default=None, help="override perception.camera (uvc|realsense|k4a)")
   parser.add_argument("--checkpoint", default=None)
   parser.add_argument("--top", type=int, default=10)
-  parser.add_argument("--out", default=None, help="write JSON of ranked grasps")
+  parser.add_argument("--out", default="./data/live_results", help="write JSON of ranked grasps")
   parser.add_argument("--ip", default=None, help="optional: live TCP pose for base-frame output")
   parser.add_argument(
     "--workspace-mask",
@@ -52,6 +53,16 @@ def parse_args():
     "--meta",
     default=None,
     help="GraspNet meta.mat containing intrinsic_matrix and factor_depth",
+  )
+  parser.add_argument(
+    "--vis-dir",
+    default="./data/live_results",
+    help="Directory for RGB and GraspNet visualisation outputs"
+  )
+  parser.add_argument(
+    "--no-visualization",
+    action="store_true",
+    help="Disable automatic grasp overlay generation"
   )
   return parser.parse_args()
 
@@ -173,6 +184,42 @@ def main() -> int:
   cloud = None if args.cloud is None else np.load(args.cloud)
   result = engine.propose(rgb=rgb, depth=depth, cloud=cloud, tcp_pose_mm=tcp, joints=joints, kin=kin, top_k=args.top, workspace_mask=workspace_mask, depth_factor_override=depth_factor_override)
   depth_src = "file" if args.depth else ("live" if live_depth is not None else ("cloud" if cloud is not None else "synthetic"))
+
+  if rgb is not None and not args.no_visualization:
+
+    timestamp = datetime.now().strftime(
+        "%Y%m%d_%H%M%S_%f"
+    )
+
+    vis_dir = Path(args.vis_dir)
+    vis_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save original RGB image.
+    import cv2
+
+    rgb_path = vis_dir / f"rgb_{timestamp}.png"
+
+    cv2.imwrite(
+        str(rgb_path),
+        cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    )
+
+    # Save grasp predictions overlaid on RGB.
+    overlay_path = (
+        vis_dir / f"grasp_overlay_{timestamp}.png"
+    )
+
+    save_grasp_overlay(
+        rgb=rgb,
+        grasps=result.top(args.top),
+        intrinsics=engine.intr,
+        output_path=overlay_path,
+        top_k=args.top,
+    )
+
+    print(f"[GraspNet] RGB input: {rgb_path}")
+    print(f"[GraspNet] Grasp overlay: {overlay_path}")
+
   print(
     f"backend={result.backend}  grasps={len(result.grasps)}  "
     f"cloud={0 if result.cloud_cam_m is None else len(result.cloud_cam_m)}  "
@@ -190,7 +237,7 @@ def main() -> int:
       + (f"  tcp={np.array(row['pose_tcp_mm_deg'])[:3].round(1).tolist()}" if "pose_tcp_mm_deg" in row else "")
     )
   if args.out:
-    Path(args.out).write_text(json.dumps({"backend": result.backend, "note": result.note, "grasps": rows}, indent=2))
+    Path(vis_dir / f"grasp_poses_{timestamp}.json").write_text(json.dumps({"backend": result.backend, "note": result.note, "grasps": rows}, indent=2))
     print(f"wrote {args.out}")
   return 0
 

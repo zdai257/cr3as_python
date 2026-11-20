@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 import numpy as np
-
+import cv2
 from .base import BaseCamera, CameraFrame, _cfg_get
 
 
@@ -106,18 +106,17 @@ class RealSenseCamera(BaseCamera):
         pass
     color = frames.get_color_frame()
     depth = frames.get_depth_frame()
-    if not color:
+
+    if not color or not depth:
       return None
-    bgr_img = np.asanyarray(color.get_data())
-    rgb = bgr_img if bgr or bgr_img.ndim < 3 else bgr_img[:, :, ::-1].copy()
-    depth_m = None
-    if depth:
-      try:
-        scale = float(depth.get_units())
-        self.depth_scale = scale
-      except Exception:
-        scale = self.depth_scale
-      depth_m = np.asanyarray(depth.get_data()).astype(np.float32) * float(scale)
+
+    # RealSense stream is configured as BGR8.
+    # Convert to RGB for the unified CameraFrame interface.
+    rgb = np.asanyarray(color.get_data())
+    rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
+    depth_m = np.asanyarray(depth.get_data()).astype(np.float32)
+    depth_m *= self.depth_scale
+
     return self._make_frame(rgb, depth=depth_m, device=self.serial or "realsense")
 
   def _release(self) -> None:

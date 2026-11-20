@@ -10,6 +10,11 @@ from .engine import (
 from .geometry import CameraIntrinsics, depth_to_cloud, synthetic_table_depth
 from .grasps import GraspProposal, filter_for_pgea
 from .mount import T_flange_cam, T_flange_tcp, mount_as_dict, nominal_t_flange_cam_mm
+from .visualizer import (
+    draw_grasps,
+    draw_grasp,
+    save_grasp_overlay,
+)
 
 __all__ = [
   "CameraIntrinsics",
@@ -26,4 +31,7 @@ __all__ = [
   "snapshot_from_camera",
   "nominal_t_flange_cam_mm",
   "synthetic_table_depth",
+  "draw_grasps",
+  "draw_grasp",
+  "save_grasp_overlay",
 ]

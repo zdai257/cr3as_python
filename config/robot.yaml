@@ -138,8 +138,8 @@ hrc:
 perception:
   # Active camera profile: uvc | realsense | k4a
   # Aliases: rs, d435i, kinect, azure_kinect, handeye
-  camera: "uvc"
-  rgbd_enabled: false       # kept; live depth comes from the selected driver (has_depth)
+  camera: "realsense"
+  rgbd_enabled: true       # kept; live depth comes from the selected driver (has_depth)
   lidar_enabled: false
   handeye_enabled: true
   rgbd_topic: ""            # TBC: ROS / camera serial / OpenNI device

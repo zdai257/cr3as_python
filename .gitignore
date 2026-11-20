@@ -7,3 +7,4 @@ weights/**/*.tar
 weights/**/*.pth
 weights/**/*.ckpt
 third_party/graspnet-baseline/
+data/live_results/
