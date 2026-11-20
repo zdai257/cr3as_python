@@ -238,3 +238,4 @@ perception:
     top_k: 50
     min_score: 0.05
     depth_factor: 1.0       # 1000 if depth PNGs are millimetres
+    workspace_mask: None  # not used currently

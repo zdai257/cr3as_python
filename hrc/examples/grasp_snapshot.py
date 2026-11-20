@@ -9,6 +9,7 @@ frames include aligned depth in metres and skip the synthetic table.
   python hrc/examples/grasp_snapshot.py --camera --driver realsense
   python hrc/examples/grasp_snapshot.py --rgb shot.png --depth depth.png --top 15
   python hrc/examples/grasp_snapshot.py --checkpoint weights/graspnet/checkpoint-rs.tar
+  python hrc/examples/grasp_snapshot.py --rgb data/results/color.png --depth data/results/depth.png --workspace-mask data/results/workspace_mask.png --meta data/results/meta.mat --top 50 --checkpoint weights/graspnet/checkpoint-rs.tar --out masked_grasps.json
 """
 
 from __future__ import annotations
@@ -42,6 +43,16 @@ def parse_args():
   parser.add_argument("--top", type=int, default=10)
   parser.add_argument("--out", default=None, help="write JSON of ranked grasps")
   parser.add_argument("--ip", default=None, help="optional: live TCP pose for base-frame output")
+  parser.add_argument(
+    "--workspace-mask",
+    default=None,
+    help="Workspace mask image (non-zero pixels are retained)",
+    )
+  parser.add_argument(
+    "--meta",
+    default=None,
+    help="GraspNet meta.mat containing intrinsic_matrix and factor_depth",
+  )
   return parser.parse_args()
 
 
@@ -116,8 +127,51 @@ def main() -> int:
   depth = None if args.depth is None else _load_image(args.depth)
   if depth is None:
     depth = live_depth
+
+  workspace_mask = None
+  depth_factor_override = None
+
+  if args.workspace_mask:
+    import cv2
+
+    mask = cv2.imread(args.workspace_mask, cv2.IMREAD_GRAYSCALE)
+    if mask is None:
+        raise FileNotFoundError(args.workspace_mask)
+
+    workspace_mask = (mask > 0).astype(np.uint8)
+
+  if args.meta:
+    from scipy.io import loadmat
+
+    meta = loadmat(args.meta)
+
+    K = np.asarray(meta["intrinsic_matrix"], dtype=np.float64)
+    depth_factor_override = float(
+        np.asarray(meta["factor_depth"]).squeeze()
+    )
+
+    engine.intr.width = int(rgb.shape[1])
+    engine.intr.height = int(rgb.shape[0])
+    engine.intr.fx = float(K[0, 0])
+    engine.intr.fy = float(K[1, 1])
+    engine.intr.cx = float(K[0, 2])
+    engine.intr.cy = float(K[1, 2])
+
+    print(
+        f"Loaded camera intrinsics: "
+        f"fx={engine.intr.fx:.2f}, fy={engine.intr.fy:.2f}, "
+        f"cx={engine.intr.cx:.2f}, cy={engine.intr.cy:.2f}"
+    )
+    print(f"Loaded depth factor: {depth_factor_override}")
+
+  if workspace_mask is not None:
+    print(
+        f"Workspace mask: {workspace_mask.shape}, "
+        f"retained pixels={np.count_nonzero(workspace_mask)}"
+    )
+
   cloud = None if args.cloud is None else np.load(args.cloud)
-  result = engine.propose(rgb=rgb, depth=depth, cloud=cloud, tcp_pose_mm=tcp, joints=joints, kin=kin, top_k=args.top)
+  result = engine.propose(rgb=rgb, depth=depth, cloud=cloud, tcp_pose_mm=tcp, joints=joints, kin=kin, top_k=args.top, workspace_mask=workspace_mask, depth_factor_override=depth_factor_override)
   depth_src = "file" if args.depth else ("live" if live_depth is not None else ("cloud" if cloud is not None else "synthetic"))
   print(
     f"backend={result.backend}  grasps={len(result.grasps)}  "

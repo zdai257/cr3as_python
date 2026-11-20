@@ -235,6 +235,8 @@ class GraspNetEngine:
     kin=None,
     top_k: Optional[int] = None,
     allow_geometric: bool = True,
+    depth_factor_override: Optional[float] = None,
+    workspace_mask: Optional[np.ndarray] = None,
   ) -> GraspResult:
     frame, rgb, depth = _unpack_frame(rgb, depth)
     self.apply_frame_intrinsics(frame)
@@ -248,7 +250,16 @@ class GraspNetEngine:
         np.asarray(depth_arr),
         self.intr,
         rgb=rgb_arr,
-        factor=self.depth_factor if np.asarray(depth_arr).max() < 20 else 1000.0,
+        factor=(
+                float(depth_factor_override)
+                if depth_factor_override is not None
+                else (
+                      self.depth_factor
+                      if np.asarray(depth_arr).max() < 20
+                      else 1000.0
+                      )
+                ),
+        workspace_mask=workspace_mask,
       )
     cloud = np.asarray(cloud, dtype=np.float32).reshape(-1, 3)
     sampled, _ = sample_cloud(cloud, self.num_point, colors)
@@ -276,7 +287,8 @@ class GraspNetEngine:
       grasps = geometric_grasps(sampled, gripper=self.gripper)
       note = "geometric fallback (install graspnet-baseline + a GraspNet checkpoint for the real model). " + note
 
-    grasps = filter_for_pgea(grasps, min_score=self.min_score, model=self.gripper)
+    # grasps = filter_for_pgea(grasps, min_score=self.min_score, model=self.gripper)
+    
     grasps = sort_by_score(grasps)[: int(top_k or self.top_k)]
     return GraspResult(
       grasps=grasps,

@@ -77,6 +77,7 @@ def depth_to_cloud(
   factor: float = 1.0,
   min_m: float = 0.05,
   max_m: float = 1.5,
+  workspace_mask: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
   """Unproject an organized depth image to Nx3 camera metres (OpenCV frame).
 
@@ -89,6 +90,21 @@ def depth_to_cloud(
   h, w = z.shape[:2]
   u, v = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
   valid = np.isfinite(z) & (z > min_m) & (z < max_m)
+
+  if workspace_mask is not None:
+    mask = np.asarray(workspace_mask)
+
+    if mask.ndim == 3:
+        mask = mask[..., 0]
+
+    if mask.shape != z.shape:
+        raise ValueError(
+            f"Workspace mask shape {mask.shape} "
+            f"does not match depth shape {z.shape}"
+        )
+
+    valid &= mask > 0
+
   z = z[valid]
   x = (u[valid] - float(intr.cx)) * z / max(float(intr.fx), 1e-6)
   y = (v[valid] - float(intr.cy)) * z / max(float(intr.fy), 1e-6)
